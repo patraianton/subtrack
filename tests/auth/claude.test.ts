@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ClaudeAuth, claudeCredKey, buildAuthorizeUrl } from '../../src/auth/claude.ts';
+import { ClaudeAuth, claudeCredKey, buildAuthorizeUrl, exchangeCode } from '../../src/auth/claude.ts';
 import { MemorySecretStore } from '../../src/secrets.ts';
 import type { ClaudeCreds } from '../../src/auth/claude.ts';
 
@@ -66,4 +66,30 @@ test('buildAuthorizeUrl includes pkce + client_id + profile scope', () => {
   assert.equal(url.searchParams.get('state'), 'STATE');
   assert.match(url.searchParams.get('scope') ?? '', /user:profile/);
   assert.ok(url.searchParams.get('client_id'));
+});
+
+test('exchangeCode strips #state suffix and POSTs correct body, returns parsed creds', async () => {
+  let capturedBody: Record<string, unknown> | undefined;
+  const fetchImpl = (async (_url: string, init?: RequestInit) => {
+    capturedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      JSON.stringify({ access_token: 'AT', refresh_token: 'RT', expires_in: 28800, scope: 'user:profile user:inference' }),
+      { status: 200 },
+    );
+  }) as unknown as typeof fetch;
+
+  const creds = await exchangeCode('abc#STATE', 'VERIFIER', { fetchImpl, clock: () => 1000 });
+
+  assert.equal(capturedBody?.grant_type, 'authorization_code');
+  assert.equal(capturedBody?.code, 'abc');
+  assert.equal(capturedBody?.code_verifier, 'VERIFIER');
+  assert.equal(creds.accessToken, 'AT');
+  assert.equal(creds.refreshToken, 'RT');
+  assert.equal(creds.expiresAt, 1000 + 28800 * 1000);
+  assert.deepEqual(creds.scopes, ['user:profile', 'user:inference']);
+});
+
+test('exchangeCode throws on non-ok response', async () => {
+  const fetchImpl = (async () => new Response('bad request', { status: 400 })) as unknown as typeof fetch;
+  await assert.rejects(() => exchangeCode('xyz', 'V', { fetchImpl, clock: () => 0 }), /code exchange failed/i);
 });
