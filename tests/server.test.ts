@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { request } from 'node:http';
 import { createApp, enrichUsage } from '../src/server.ts';
 import { SnapshotStore } from '../src/snapshotStore.ts';
 import type { NormalizedUsage } from '../src/types.ts';
@@ -42,4 +43,29 @@ test('GET /api/health returns ok', async () => {
     const res = await fetch(`${baseUrl}/api/health`);
     assert.equal((await res.json() as { ok: boolean }).ok, true);
   });
+});
+
+function rawStatus(port: number, path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path, method: 'GET' }, (res) => {
+      res.resume();
+      resolve(res.statusCode ?? 0);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('blocks path traversal outside webDir with 403', async () => {
+  const store = new SnapshotStore();
+  const server = createApp(store, { webDir, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 } });
+  await new Promise<void>((r) => server.listen(0, r));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+  try {
+    const code = await rawStatus(port, '/../../package.json'); // resolves outside webDir
+    assert.equal(code, 403);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
 });
