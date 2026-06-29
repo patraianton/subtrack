@@ -1,0 +1,6 @@
+{
+  "primary":   { "window_minutes": 300,   "used_percent": 18, "resets_at": 1782744000 },
+  "secondary": { "window_minutes": 10080, "used_percent": 33, "resets_at": 1783200000 },
+  "credits":   { "has_credits": true, "unlimited": false, "balance": 12.5 },
+  "additional_rate_limits": []
+}
