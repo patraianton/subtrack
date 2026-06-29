@@ -13,7 +13,7 @@ async function fixture() {
   return JSON.parse(await readFile(p, 'utf8'));
 }
 
-test('normalizeCodexUsage maps primary->session, secondary->weekly by window_minutes', async () => {
+test('normalizeCodexUsage maps primary_window->session, secondary_window->weekly by limit_window_seconds', async () => {
   const u = normalizeCodexUsage(await fixture(), ACC, NOW);
   assert.equal(u.session?.utilization, 18);
   assert.equal(u.weekly?.utilization, 33);
@@ -22,10 +22,12 @@ test('normalizeCodexUsage maps primary->session, secondary->weekly by window_min
   assert.equal(u.status, 'ok');
 });
 
-test('normalizeCodexUsage maps windows regardless of primary/secondary ordering', () => {
+test('normalizeCodexUsage maps windows by limit_window_seconds regardless of slot ordering', () => {
   const swapped = {
-    primary:   { window_minutes: 10080, used_percent: 33, resets_at: 1783200000 },
-    secondary: { window_minutes: 300,   used_percent: 18, resets_at: 1782744000 },
+    rate_limit: {
+      primary_window:   { limit_window_seconds: 604800, used_percent: 33, reset_at: 1783200000 },
+      secondary_window: { limit_window_seconds: 18000,  used_percent: 18, reset_at: 1782744000 },
+    },
   };
   const u = normalizeCodexUsage(swapped, ACC, NOW);
   assert.equal(u.session?.utilization, 18);

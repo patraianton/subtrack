@@ -2,34 +2,42 @@ import type { AccountConfig, NormalizedUsage, UsageWindow } from '../types.ts';
 import { baseUsage } from './shell.ts';
 
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
-const SESSION_MINUTES = 300;
-const WEEKLY_MINUTES = 10080;
+const SESSION_SECONDS = 18_000;   // 5-hour window  (verified live, Task 9 spike)
+const WEEKLY_SECONDS = 604_800;   // 7-day window
 
-interface RawLimit { window_minutes?: number; used_percent?: number; resets_at?: number }
+// Real wham/usage shape (verified 2026-06-29): windows are nested under `rate_limit`
+// as primary_window/secondary_window, each with used_percent + limit_window_seconds + reset_at (unix s).
+interface RawWindow { used_percent?: number; limit_window_seconds?: number; reset_at?: number }
+interface RawRateLimit { primary_window?: RawWindow; secondary_window?: RawWindow }
 
-function pickByWindow(limits: RawLimit[], target: number): RawLimit | null {
-  let best: RawLimit | null = null;
-  let bestDiff = Infinity;
-  for (const l of limits) {
-    if (typeof l.window_minutes !== 'number') continue;
-    const d = Math.abs(l.window_minutes - target);
-    if (d < bestDiff) { best = l; bestDiff = d; }
-  }
-  return best;
+function toWindow(w: RawWindow | undefined): UsageWindow | null {
+  if (!w || typeof w.used_percent !== 'number') return null;
+  return { utilization: w.used_percent, resetsAt: new Date((w.reset_at ?? 0) * 1000).toISOString() };
 }
 
-function toWindow(l: RawLimit | null): UsageWindow | null {
-  if (!l || typeof l.used_percent !== 'number') return null;
-  return { utilization: l.used_percent, resetsAt: new Date((l.resets_at ?? 0) * 1000).toISOString() };
+// Assign each present window to session (≈5h) or weekly (≈7d) by its limit_window_seconds,
+// so mapping is robust regardless of which slot (primary/secondary) the API uses.
+function classify(windows: RawWindow[]): { session?: RawWindow; weekly?: RawWindow } {
+  const out: { session?: RawWindow; weekly?: RawWindow } = {};
+  for (const w of windows) {
+    const secs = w.limit_window_seconds ?? 0;
+    const isSession = Math.abs(secs - SESSION_SECONDS) <= Math.abs(secs - WEEKLY_SECONDS);
+    if (isSession) { if (!out.session) out.session = w; }
+    else if (!out.weekly) out.weekly = w;
+  }
+  return out;
 }
 
 export function normalizeCodexUsage(snapshot: unknown, account: AccountConfig, now: Date = new Date()): NormalizedUsage {
-  const s = (snapshot ?? {}) as { primary?: RawLimit; secondary?: RawLimit };
-  const limits = [s.primary, s.secondary].filter((x): x is RawLimit => !!x);
-  const session = toWindow(pickByWindow(limits, SESSION_MINUTES));
-  const weekly = toWindow(pickByWindow(limits, WEEKLY_MINUTES));
-  // The wham/usage 200-body shape is the one thing research could not verify live (§7.2/§15).
-  // If neither window resolves, treat it as an error rather than a silent "ok" with empty bars.
+  const rl = (snapshot as { rate_limit?: RawRateLimit } | null)?.rate_limit;
+  const windows = [rl?.primary_window, rl?.secondary_window].filter(
+    (w): w is RawWindow => !!w && typeof (w as RawWindow).used_percent === 'number',
+  );
+  const { session: sessionRaw, weekly: weeklyRaw } = classify(windows);
+  const session = toWindow(sessionRaw);
+  const weekly = toWindow(weeklyRaw);
+  // The wham/usage 200-body shape was unverified at design time (§7.2/§15). If no
+  // rate-limit windows resolve, treat it as an error rather than a silent "ok" with empty bars.
   if (!session && !weekly) {
     return {
       accountId: account.id, label: account.label, provider: 'codex',
