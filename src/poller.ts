@@ -21,6 +21,7 @@ export class Poller {
   private readonly state = new Map<string, AccountState>();
   private readonly clock: () => number;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private running = false;
 
   constructor(private readonly deps: PollerDeps) {
     this.clock = deps.clock ?? Date.now;
@@ -48,24 +49,30 @@ export class Poller {
   }
 
   async tick(now: number = this.clock()): Promise<void> {
-    for (const acc of this.due(now)) {
-      let usage: NormalizedUsage;
-      try {
-        usage = await this.deps.fetchUsage(acc);
-      } catch (e) {
-        usage = { accountId: acc.id, label: acc.label, provider: acc.provider, session: null, weekly: null, weeklyOpus: null, status: 'error', lastUpdated: new Date(now).toISOString(), error: e instanceof Error ? e.message : String(e), retryAt: null };
-      }
-      // Never blank the dashboard: on any non-ok result, carry forward the last-known windows.
-      if (usage.status !== 'ok') {
-        const prior = this.deps.store.get(acc.id);
-        if (prior) {
-          usage.session = prior.session;
-          usage.weekly = prior.weekly;
-          usage.weeklyOpus = prior.weeklyOpus;
+    if (this.running) return;
+    this.running = true;
+    try {
+      for (const acc of this.due(now)) {
+        let usage: NormalizedUsage;
+        try {
+          usage = await this.deps.fetchUsage(acc);
+        } catch (e) {
+          usage = { accountId: acc.id, label: acc.label, provider: acc.provider, session: null, weekly: null, weeklyOpus: null, status: 'error', lastUpdated: new Date(now).toISOString(), error: e instanceof Error ? e.message : String(e), retryAt: null };
         }
+        // Never blank the dashboard: on any non-ok result, carry forward the last-known windows.
+        if (usage.status !== 'ok') {
+          const prior = this.deps.store.get(acc.id);
+          if (prior) {
+            usage.session = prior.session;
+            usage.weekly = prior.weekly;
+            usage.weeklyOpus = prior.weeklyOpus;
+          }
+        }
+        this.applyBackoff(acc, usage, now);
+        this.deps.store.set(acc.id, usage);
       }
-      this.applyBackoff(acc, usage, now);
-      this.deps.store.set(acc.id, usage);
+    } finally {
+      this.running = false;
     }
   }
 
@@ -88,6 +95,7 @@ export class Poller {
   }
 
   start(): void {
+    if (this.timer) return;
     const setI = this.deps.setIntervalImpl ?? setInterval;
     const tickMs = this.deps.tickMs ?? 5_000;
     void this.tick();

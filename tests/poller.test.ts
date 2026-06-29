@@ -97,3 +97,20 @@ test('one failing account does not block others', async () => {
   assert.equal(store.get('c1')?.status, 'error');
   assert.equal(store.get('x1')?.status, 'ok');
 });
+
+test('tick() does not run concurrently with itself (in-flight guard)', async () => {
+  const store = new SnapshotStore();
+  let resolveGate!: () => void;
+  const gate = new Promise<void>((r) => { resolveGate = r; });
+  let calls = 0;
+  const p = new Poller({
+    config: { ...config, accounts: [accounts[0]!] }, store, clock: () => 0,
+    fetchUsage: async (a) => { calls += 1; await gate; return ok(a.id); },
+  });
+  const first = p.tick(0);     // enters, sets running=true, blocks inside fetchUsage
+  await p.tick(0);             // running === true -> returns immediately, no fetch
+  assert.equal(calls, 1);      // the second tick did not fetch
+  resolveGate();
+  await first;
+  assert.equal(calls, 1);      // still only one fetch after first tick resolves
+});
