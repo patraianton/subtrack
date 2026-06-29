@@ -1,3 +1,77 @@
-export async function serve(_base: string): Promise<number> {
-  throw new Error('serve not implemented yet (Task 11)');
+import { createServer, type Server, type ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { join, normalize, extname } from 'node:path';
+import { homedir } from 'node:os';
+import open from 'open';
+import type { NormalizedUsage, Severity, UsageWindow } from './types.ts';
+import { severityFor } from './thresholds.ts';
+import { SnapshotStore } from './snapshotStore.ts';
+import { Poller } from './poller.ts';
+import { loadConfig } from './config.ts';
+import { defaultSecretStore } from './secrets.ts';
+import { ClaudeAuth } from './auth/claude.ts';
+import { makeFetchUsage } from './adapters/index.ts';
+
+export interface ApiWindow extends UsageWindow { severity: Severity }
+export interface EnrichedUsage extends Omit<NormalizedUsage, 'session' | 'weekly' | 'weeklyOpus'> {
+  session: ApiWindow | null;
+  weekly: ApiWindow | null;
+  weeklyOpus: ApiWindow | null;
+}
+
+function enrichWindow(w: UsageWindow | null): ApiWindow | null {
+  return w ? { ...w, severity: severityFor(w.utilization) } : null;
+}
+
+export function enrichUsage(u: NormalizedUsage): EnrichedUsage {
+  return { ...u, session: enrichWindow(u.session), weekly: enrichWindow(u.weekly), weeklyOpus: enrichWindow(u.weeklyOpus) };
+}
+
+const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+
+export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: { claude: number; codex: number } }): Server {
+  return createServer(async (req, res) => {
+    const url = (req.url ?? '/').split('?')[0]!;
+    try {
+      if (url === '/api/health') return json(res, { ok: true });
+      if (url === '/api/usage') {
+        const accounts = store.all().map(enrichUsage).sort(byTightest);
+        return json(res, { accounts, uiRefreshSeconds: opts.uiRefreshSeconds, pollIntervalSeconds: opts.pollIntervalSeconds });
+      }
+      const file = url === '/' ? 'index.html' : url.replace(/^\//, '');
+      const full = normalize(join(opts.webDir, file));
+      if (!full.startsWith(normalize(opts.webDir))) { res.writeHead(403).end('forbidden'); return; }
+      const data = await readFile(full);
+      res.writeHead(200, { 'content-type': MIME[extname(full)] ?? 'application/octet-stream' }).end(data);
+    } catch {
+      res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
+    }
+  });
+}
+
+function maxUtil(u: EnrichedUsage): number {
+  return Math.max(u.session?.utilization ?? -1, u.weekly?.utilization ?? -1);
+}
+function byTightest(a: EnrichedUsage, b: EnrichedUsage): number {
+  return maxUtil(b) - maxUtil(a);
+}
+
+function json(res: ServerResponse, body: unknown): void {
+  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
+}
+
+export async function serve(base: string = homedir()): Promise<number> {
+  const cfg = await loadConfig(base);
+  const store = new SnapshotStore();
+  const fetchUsage = makeFetchUsage({ claudeAuth: new ClaudeAuth(defaultSecretStore()) });
+  const poller = new Poller({ config: cfg, fetchUsage, store });
+  poller.start();
+  const webDir = fileURLToPath(new URL('../web/', import.meta.url)); // decode %20 etc — never use .pathname on Windows
+  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds });
+  await new Promise<void>((r) => server.listen(cfg.port, r));
+  const dashUrl = `http://localhost:${cfg.port}`;
+  console.log(`subtrack dashboard → ${dashUrl}  (polling ${cfg.accounts.filter((a) => a.enabled).length} accounts)`);
+  await open(dashUrl);
+  return await new Promise<number>(() => { /* run until killed */ });
 }
