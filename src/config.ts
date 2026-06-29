@@ -23,9 +23,9 @@ export async function loadConfig(base: string = homedir()): Promise<SubtrackConf
   try {
     const raw = await readFile(configPath(base), 'utf8');
     const parsed = JSON.parse(raw) as Partial<SubtrackConfig>;
-    return { ...DEFAULT_CONFIG, ...parsed, accounts: parsed.accounts ?? [] };
+    return { ...DEFAULT_CONFIG, ...parsed, pollIntervalSeconds: { ...DEFAULT_CONFIG.pollIntervalSeconds, ...parsed.pollIntervalSeconds }, accounts: parsed.accounts ?? [] };
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ...DEFAULT_CONFIG };
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ...DEFAULT_CONFIG, pollIntervalSeconds: { ...DEFAULT_CONFIG.pollIntervalSeconds } };
     throw e;
   }
 }
