@@ -1,7 +1,7 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { join, normalize, extname } from 'node:path';
+import { join, normalize, extname, sep } from 'node:path';
 import { homedir } from 'node:os';
 import open from 'open';
 import type { NormalizedUsage, Severity, UsageWindow } from './types.ts';
@@ -41,7 +41,8 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
       }
       const file = url === '/' ? 'index.html' : url.replace(/^\//, '');
       const full = normalize(join(opts.webDir, file));
-      if (!full.startsWith(normalize(opts.webDir))) { res.writeHead(403).end('forbidden'); return; }
+      const safeBase = normalize(opts.webDir) + sep;
+      if (!full.startsWith(safeBase)) { res.writeHead(403).end('forbidden'); return; }
       const data = await readFile(full);
       res.writeHead(200, { 'content-type': MIME[extname(full)] ?? 'application/octet-stream' }).end(data);
     } catch {
