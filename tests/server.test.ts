@@ -1,0 +1,45 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { createApp, enrichUsage } from '../src/server.ts';
+import { SnapshotStore } from '../src/snapshotStore.ts';
+import type { NormalizedUsage } from '../src/types.ts';
+
+const webDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'web');
+
+function usage(id: string, util: number): NormalizedUsage {
+  return { accountId: id, label: id, provider: 'claude', session: { utilization: util, resetsAt: '2026-06-29T17:00:00.000Z' }, weekly: null, weeklyOpus: null, status: 'ok', lastUpdated: '2026-06-29T12:00:00.000Z', error: null, retryAt: null };
+}
+
+test('enrichUsage adds severity to windows', () => {
+  const e = enrichUsage(usage('c1', 95));
+  assert.equal(e.session?.severity, 'crit');
+});
+
+async function withServer(store: SnapshotStore, fn: (baseUrl: string) => Promise<void>) {
+  const server = createApp(store, { webDir, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 } });
+  await new Promise<void>((r) => server.listen(0, r));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+  try { await fn(`http://127.0.0.1:${port}`); } finally { await new Promise<void>((r) => server.close(() => r())); }
+}
+
+test('GET /api/usage returns enriched snapshot JSON', async () => {
+  const store = new SnapshotStore();
+  store.set('c1', usage('c1', 72));
+  await withServer(store, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/usage`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { accounts: Array<{ session: { severity: string } }>; uiRefreshSeconds: number };
+    assert.equal(body.accounts[0]!.session.severity, 'warn');
+    assert.equal(body.uiRefreshSeconds, 30);
+  });
+});
+
+test('GET /api/health returns ok', async () => {
+  await withServer(new SnapshotStore(), async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/health`);
+    assert.equal((await res.json() as { ok: boolean }).ok, true);
+  });
+});
