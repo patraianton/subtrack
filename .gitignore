@@ -1,0 +1,22 @@
+# --- Secrets: NEVER commit anything that could carry OAuth tokens ---
+.subtrack/
+accounts.json
+codex-homes/
+*.credentials.json
+.env
+.env.*
+*.token
+*.pem
+
+# --- Node ---
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
