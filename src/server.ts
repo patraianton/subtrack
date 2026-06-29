@@ -70,7 +70,7 @@ export async function serve(base: string = homedir()): Promise<number> {
   poller.start();
   const webDir = fileURLToPath(new URL('../web/', import.meta.url)); // decode %20 etc — never use .pathname on Windows
   const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds });
-  await new Promise<void>((r) => server.listen(cfg.port, r));
+  await new Promise<void>((r) => server.listen(cfg.port, '127.0.0.1', r));
   const dashUrl = `http://localhost:${cfg.port}`;
   console.log(`subtrack dashboard → ${dashUrl}  (polling ${cfg.accounts.filter((a) => a.enabled).length} accounts)`);
   await open(dashUrl);

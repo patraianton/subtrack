@@ -43,3 +43,15 @@ test('removeAccount drops the matching id', () => {
   const after = removeAccount(cfg, 'a');
   assert.deepEqual(after.accounts.map((x) => x.id), ['b']);
 });
+
+test('loadConfig deep-merges partial pollIntervalSeconds, preserving defaults for missing keys', async () => {
+  await withTempBase(async (base) => {
+    const { mkdir: mkdirFs, writeFile: writeFileFs } = await import('node:fs/promises');
+    const { configDir, configPath } = await import('../src/config.ts');
+    await mkdirFs(configDir(base), { recursive: true });
+    await writeFileFs(configPath(base), JSON.stringify({ version: 1, pollIntervalSeconds: { claude: 300 } }), 'utf8');
+    const cfg = await loadConfig(base);
+    assert.equal(cfg.pollIntervalSeconds.claude, 300);
+    assert.equal(cfg.pollIntervalSeconds.codex, 60);
+  });
+});

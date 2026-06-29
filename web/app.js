@@ -1,5 +1,7 @@
 import { formatCountdown } from '/format.js';
 
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 const cardsEl = document.getElementById('cards');
 const summaryEl = document.getElementById('summary');
 const updatedEl = document.getElementById('updated');
@@ -24,11 +26,11 @@ function card(u, now) {
   const notes = [];
   if (u.status === 'throttled' && u.retryAt) notes.push(`⏳ retry in ${formatCountdown(u.retryAt, now)}`);
   if (u.status !== 'ok' && u.error) notes.push(u.error);
-  const note = notes.length ? `<div class="err">${notes.join(' · ')}</div>` : '';
+  const note = notes.length ? `<div class="err">${esc(notes.join(' · '))}</div>` : '';
   const ts = u.lastUpdated ? `<span class="cardts">${new Date(u.lastUpdated).toLocaleTimeString()}</span>` : '';
   const stale = isStale(u, now) ? ' stale' : '';
   return `<section class="card ${u.status}${stale}">`
-    + `<div class="card-head"><span class="badge">${u.provider}</span><span class="label">${u.label}</span>${ts}<span class="dot ${u.status}"></span></div>`
+    + `<div class="card-head"><span class="badge">${u.provider}</span><span class="label">${esc(u.label)}</span>${ts}<span class="dot ${u.status}"></span></div>`
     + gauge('session', u.session, now) + gauge('weekly', u.weekly, now) + opus + note + `</section>`;
 }
 
