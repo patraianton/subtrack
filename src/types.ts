@@ -25,8 +25,7 @@ export interface AccountConfig {
   label: string;
   provider: Provider;
   enabled: boolean;
-  credentialKey?: string;   // claude: Credential Manager key
-  credentialsHome?: string; // codex: isolated CODEX_HOME path
+  credentialsHome?: string; // isolated config dir: claude → CLAUDE_CONFIG_DIR, codex → CODEX_HOME
 }
 
 export interface SubtrackConfig {

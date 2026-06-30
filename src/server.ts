@@ -9,8 +9,6 @@ import { severityFor } from './thresholds.ts';
 import { SnapshotStore } from './snapshotStore.ts';
 import { Poller } from './poller.ts';
 import { loadConfig } from './config.ts';
-import { defaultSecretStore } from './secrets.ts';
-import { ClaudeAuth } from './auth/claude.ts';
 import { makeFetchUsage } from './adapters/index.ts';
 
 export interface ApiWindow extends UsageWindow { severity: Severity }
@@ -68,7 +66,7 @@ function json(res: ServerResponse, body: unknown): void {
 export async function serve(base: string = homedir()): Promise<number> {
   const cfg = await loadConfig(base);
   const store = new SnapshotStore();
-  const fetchUsage = makeFetchUsage({ claudeAuth: new ClaudeAuth(defaultSecretStore()) });
+  const fetchUsage = makeFetchUsage();
   const poller = new Poller({ config: cfg, fetchUsage, store });
   poller.start();
   const webDir = fileURLToPath(new URL('../web/', import.meta.url)); // decode %20 etc — never use .pathname on Windows

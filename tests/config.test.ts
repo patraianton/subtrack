@@ -22,7 +22,7 @@ test('loadConfig returns defaults when file is missing', async () => {
 
 test('saveConfig then loadConfig round-trips accounts', async () => {
   await withTempBase(async (base) => {
-    const acc: AccountConfig = { id: 'c1', label: 'C1', provider: 'claude', enabled: true, credentialKey: 'subtrack/c1' };
+    const acc: AccountConfig = { id: 'c1', label: 'C1', provider: 'claude', enabled: true, credentialsHome: '/home/c1' };
     await saveConfig(addAccount({ ...DEFAULT_CONFIG }, acc), base);
     const cfg = await loadConfig(base);
     assert.equal(cfg.accounts.length, 1);

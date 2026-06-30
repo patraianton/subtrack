@@ -1,14 +1,21 @@
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import type { AccountConfig, NormalizedUsage } from './types.ts';
 import { loadConfig, saveConfig, addAccount, removeAccount, configDir } from './config.ts';
-import { defaultSecretStore } from './secrets.ts';
-import { ClaudeAuth, claudeCredKey } from './auth/claude.ts';
+import { claudeHomeDir, buildClaudeLogin, readClaudeOauth } from './auth/claude.ts';
 import { codexHomeDir, buildCodexLogin } from './auth/codex.ts';
 import { makeFetchUsage } from './adapters/index.ts';
+
+/** Spawn an interactive child (stdio inherited) and resolve when it exits. */
+function runInteractive(cmd: string, args: string[], env: Record<string, string>): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const child = spawn(cmd, args, { stdio: 'inherit', env: { ...process.env, ...env }, shell: true });
+    child.on('exit', () => resolve());
+    child.on('error', () => resolve());
+  });
+}
 
 export interface ParsedArgs {
   cmd: string;
@@ -48,7 +55,7 @@ export function formatCheckTable(usages: NormalizedUsage[]): string {
 
 async function cmdCheck(base: string): Promise<number> {
   const cfg = await loadConfig(base);
-  const fetchUsage = makeFetchUsage({ claudeAuth: new ClaudeAuth(defaultSecretStore()) });
+  const fetchUsage = makeFetchUsage();
   const enabled = cfg.accounts.filter((a) => a.enabled);
   const usages = await Promise.all(enabled.map((a) => fetchUsage(a)));
   console.log(formatCheckTable(usages));
@@ -80,41 +87,28 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
   }
   const cfg = await loadConfig(base);
   if (provider === 'claude') {
-    // Capture the credentials Claude Code wrote after `claude /login` for the currently active account.
-    // (A bare `claude setup-token` lacks the user:profile scope and 403s on /api/oauth/usage; the
-    //  /login token — same sk-ant-oat01- prefix — carries user:profile and a refresh token.)
-    const credPath = join(homedir(), '.claude', '.credentials.json');
-    let oauth: { accessToken?: string; refreshToken?: string; expiresAt?: number; scopes?: string[] } | undefined;
-    try {
-      oauth = (JSON.parse(await readFile(credPath, 'utf8')) as { claudeAiOauth?: typeof oauth }).claudeAiOauth;
-    } catch {
-      console.error(`Could not read ${credPath}. In Claude Code, run \`claude /login\` as the "${id}" account first, then re-run this.`);
-      return 2;
-    }
+    // Isolated CLAUDE_CONFIG_DIR per account: log Claude Code in HERE so subtrack owns this account's
+    // token (separate from the user's main ~/.claude) and can auto-refresh it forever without conflict.
+    const home = claudeHomeDir(configDir(base), id!);
+    await mkdir(home, { recursive: true });
+    console.log(`\nLaunching Claude Code with an isolated config (CLAUDE_CONFIG_DIR=${home}).`);
+    console.log(`In it: run  /login , sign in as the "${id}" account, then  /exit  (or Ctrl-C). subtrack will own this token.\n`);
+    const spec = buildClaudeLogin(home);
+    await runInteractive(spec.cmd, spec.args, spec.env);
+    const oauth = await readClaudeOauth(home);
     if (!oauth?.accessToken) {
-      console.error(`No Claude login token in ${credPath}. Run \`claude /login\` (as the "${id}" account) first.`);
+      console.error(`No login credentials found in ${home}. Did you complete /login? Re-run add-account.`);
       return 2;
     }
-    const creds = {
-      accessToken: oauth.accessToken,
-      refreshToken: oauth.refreshToken ?? '',
-      expiresAt: typeof oauth.expiresAt === 'number' ? oauth.expiresAt : Date.now() + 8 * 60 * 60 * 1000,
-      scopes: oauth.scopes ?? [],
-    };
-    await defaultSecretStore().set(claudeCredKey(id!), JSON.stringify(creds));
-    const acc: AccountConfig = { id: id!, label: label!, provider: 'claude', enabled: true, credentialKey: claudeCredKey(id!) };
+    const acc: AccountConfig = { id: id!, label: label!, provider: 'claude', enabled: true, credentialsHome: home };
     await saveConfig(addAccount(cfg, acc), base);
-    console.log(`Added Claude account ${id} — captured the current \`claude /login\` credentials.`);
+    console.log(`Added Claude account ${id} — isolated; subtrack auto-refreshes it (no manual rotation).`);
   } else {
     const home = codexHomeDir(configDir(base), id!);
     await mkdir(home, { recursive: true });
     console.log(`\nLaunching: codex login (CODEX_HOME=${home}). Log in as this Codex account.\n`);
     const spec = buildCodexLogin(home);
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(spec.cmd, spec.args, { stdio: 'inherit', env: { ...process.env, ...spec.env }, shell: true });
-      child.on('exit', (c) => (c === 0 ? resolve() : reject(new Error(`codex login exited ${c}`))));
-      child.on('error', reject);
-    });
+    await runInteractive(spec.cmd, spec.args, spec.env);
     const acc: AccountConfig = { id: id!, label: label!, provider: 'codex', enabled: true, credentialsHome: home };
     await saveConfig(addAccount(cfg, acc), base);
     console.log(`Added Codex account ${id}.`);

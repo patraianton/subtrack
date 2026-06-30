@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { normalizeClaudeUsage, fetchClaudeUsage } from '../../src/adapters/claude.ts';
 import type { AccountConfig } from '../../src/types.ts';
 
-const ACC: AccountConfig = { id: 'c1', label: 'Claude 1', provider: 'claude', enabled: true, credentialKey: 'subtrack/c1' };
+const ACC: AccountConfig = { id: 'c1', label: 'Claude 1', provider: 'claude', enabled: true, credentialsHome: '/home/c1' };
 const NOW = new Date('2026-06-29T12:00:00.000Z');
 
 async function fixture() {
