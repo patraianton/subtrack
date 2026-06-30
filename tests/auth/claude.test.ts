@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ClaudeAuth, claudeCredKey, buildAuthorizeUrl, exchangeCode } from '../../src/auth/claude.ts';
+import { ClaudeAuth, claudeCredKey } from '../../src/auth/claude.ts';
 import { MemorySecretStore } from '../../src/secrets.ts';
 import type { ClaudeCreds } from '../../src/auth/claude.ts';
 
@@ -59,45 +59,5 @@ test('refresh failure surfaces an error', async () => {
   await assert.rejects(() => auth.getAccessToken('c1'), /refresh failed/i);
 });
 
-test('buildAuthorizeUrl targets the consumer subscription flow with pkce + login scopes', () => {
-  const url = new URL(buildAuthorizeUrl('CHAL', 'STATE'));
-  assert.equal(url.origin, 'https://claude.com');     // SUBSCRIPTION flow, NOT platform.claude.com (API console)
-  assert.equal(url.pathname, '/cai/oauth/authorize');
-  assert.equal(url.searchParams.get('code'), 'true');
-  assert.equal(url.searchParams.get('response_type'), 'code');
-  assert.equal(url.searchParams.get('redirect_uri'), 'https://platform.claude.com/oauth/code/callback');
-  assert.equal(url.searchParams.get('code_challenge'), 'CHAL');
-  assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
-  assert.equal(url.searchParams.get('state'), 'STATE');
-  const scope = url.searchParams.get('scope') ?? '';
-  assert.match(scope, /user:profile/);
-  assert.match(scope, /user:sessions:claude_code/); // login scope set, not the setup-token org:create_api_key
-  assert.doesNotMatch(scope, /org:create_api_key/);
-  assert.ok(url.searchParams.get('client_id'));
-});
-
-test('exchangeCode strips #state suffix and POSTs correct body, returns parsed creds', async () => {
-  let capturedBody: Record<string, unknown> | undefined;
-  const fetchImpl = (async (_url: string, init?: RequestInit) => {
-    capturedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    return new Response(
-      JSON.stringify({ access_token: 'AT', refresh_token: 'RT', expires_in: 28800, scope: 'user:profile user:inference' }),
-      { status: 200 },
-    );
-  }) as unknown as typeof fetch;
-
-  const creds = await exchangeCode('abc#STATE', 'VERIFIER', { fetchImpl, clock: () => 1000 });
-
-  assert.equal(capturedBody?.grant_type, 'authorization_code');
-  assert.equal(capturedBody?.code, 'abc');
-  assert.equal(capturedBody?.code_verifier, 'VERIFIER');
-  assert.equal(creds.accessToken, 'AT');
-  assert.equal(creds.refreshToken, 'RT');
-  assert.equal(creds.expiresAt, 1000 + 28800 * 1000);
-  assert.deepEqual(creds.scopes, ['user:profile', 'user:inference']);
-});
-
-test('exchangeCode throws on non-ok response', async () => {
-  const fetchImpl = (async () => new Response('bad request', { status: 400 })) as unknown as typeof fetch;
-  await assert.rejects(() => exchangeCode('xyz', 'V', { fetchImpl, clock: () => 0 }), /code exchange failed/i);
-});
+// (Web-flow tests removed: subtrack no longer does OAuth authorize/exchange — Claude Code
+// mints the token via `claude setup-token` and the user pastes the bare sk-ant-oat01-… token.)

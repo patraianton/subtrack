@@ -3,13 +3,10 @@ import { createInterface } from 'node:readline/promises';
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import open from 'open';
 import type { AccountConfig, NormalizedUsage } from './types.ts';
 import { loadConfig, saveConfig, addAccount, removeAccount, configDir } from './config.ts';
 import { defaultSecretStore } from './secrets.ts';
-import { ClaudeAuth, claudeCredKey, buildAuthorizeUrl, exchangeCode } from './auth/claude.ts';
-import { generatePkce, base64url } from './pkce.ts';
-import { randomBytes } from 'node:crypto';
+import { ClaudeAuth, claudeCredKey } from './auth/claude.ts';
 import { codexHomeDir, buildCodexLogin } from './auth/codex.ts';
 import { makeFetchUsage } from './adapters/index.ts';
 
@@ -83,15 +80,21 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
   }
   const cfg = await loadConfig(base);
   if (provider === 'claude') {
-    const { verifier, challenge } = generatePkce();
-    const state = base64url(randomBytes(16));
-    const url = buildAuthorizeUrl(challenge, state);
-    console.log('\nA browser will open. Log in AS THIS ACCOUNT (use a private window to switch identities), approve, then paste the code shown.\n');
-    await open(url);
+    console.log(
+      `\nIn a terminal logged into the Claude account "${id}", run:\n\n    claude setup-token\n\n` +
+        `Then paste the token it prints (starts with sk-ant-oat01-). No browser, no API key.\n`,
+    );
     const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const code = await rl.question('Paste authorization code: ');
+    const token = (await rl.question('Paste setup-token: ')).trim();
     rl.close();
-    const creds = await exchangeCode(code.trim(), verifier);
+    if (!/^sk-ant-oat01-/.test(token)) {
+      console.error('That does not look like a setup-token (expected it to start with "sk-ant-oat01-").');
+      return 2;
+    }
+    // Bare setup-token: no refresh token, so treat it as long-lived (far-future expiry means
+    // getAccessToken never tries to refresh). On 401/403 the adapter surfaces auth_error and the
+    // user re-runs add-account with a fresh token.
+    const creds = { accessToken: token, refreshToken: '', expiresAt: Date.now() + 100 * 365 * 24 * 60 * 60 * 1000, scopes: [] };
     await defaultSecretStore().set(claudeCredKey(id!), JSON.stringify(creds));
     const acc: AccountConfig = { id: id!, label: label!, provider: 'claude', enabled: true, credentialKey: claudeCredKey(id!) };
     await saveConfig(addAccount(cfg, acc), base);
