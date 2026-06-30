@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
-import { createInterface } from 'node:readline/promises';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AccountConfig, NormalizedUsage } from './types.ts';
 import { loadConfig, saveConfig, addAccount, removeAccount, configDir } from './config.ts';
@@ -80,25 +80,31 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
   }
   const cfg = await loadConfig(base);
   if (provider === 'claude') {
-    console.log(
-      `\nIn a terminal logged into the Claude account "${id}", run:\n\n    claude setup-token\n\n` +
-        `Then paste the token it prints (starts with sk-ant-oat01-). No browser, no API key.\n`,
-    );
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const token = (await rl.question('Paste setup-token: ')).trim();
-    rl.close();
-    if (!/^sk-ant-oat01-/.test(token)) {
-      console.error('That does not look like a setup-token (expected it to start with "sk-ant-oat01-").');
+    // Capture the credentials Claude Code wrote after `claude /login` for the currently active account.
+    // (A bare `claude setup-token` lacks the user:profile scope and 403s on /api/oauth/usage; the
+    //  /login token — same sk-ant-oat01- prefix — carries user:profile and a refresh token.)
+    const credPath = join(homedir(), '.claude', '.credentials.json');
+    let oauth: { accessToken?: string; refreshToken?: string; expiresAt?: number; scopes?: string[] } | undefined;
+    try {
+      oauth = (JSON.parse(await readFile(credPath, 'utf8')) as { claudeAiOauth?: typeof oauth }).claudeAiOauth;
+    } catch {
+      console.error(`Could not read ${credPath}. In Claude Code, run \`claude /login\` as the "${id}" account first, then re-run this.`);
       return 2;
     }
-    // Bare setup-token: no refresh token, so treat it as long-lived (far-future expiry means
-    // getAccessToken never tries to refresh). On 401/403 the adapter surfaces auth_error and the
-    // user re-runs add-account with a fresh token.
-    const creds = { accessToken: token, refreshToken: '', expiresAt: Date.now() + 100 * 365 * 24 * 60 * 60 * 1000, scopes: [] };
+    if (!oauth?.accessToken) {
+      console.error(`No Claude login token in ${credPath}. Run \`claude /login\` (as the "${id}" account) first.`);
+      return 2;
+    }
+    const creds = {
+      accessToken: oauth.accessToken,
+      refreshToken: oauth.refreshToken ?? '',
+      expiresAt: typeof oauth.expiresAt === 'number' ? oauth.expiresAt : Date.now() + 8 * 60 * 60 * 1000,
+      scopes: oauth.scopes ?? [],
+    };
     await defaultSecretStore().set(claudeCredKey(id!), JSON.stringify(creds));
     const acc: AccountConfig = { id: id!, label: label!, provider: 'claude', enabled: true, credentialKey: claudeCredKey(id!) };
     await saveConfig(addAccount(cfg, acc), base);
-    console.log(`Added Claude account ${id}.`);
+    console.log(`Added Claude account ${id} — captured the current \`claude /login\` credentials.`);
   } else {
     const home = codexHomeDir(configDir(base), id!);
     await mkdir(home, { recursive: true });
@@ -134,5 +140,7 @@ export async function main(argv: string[], base: string = homedir()): Promise<nu
 // so a string-built `file://...` URL never equals import.meta.url; use pathToFileURL).
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
-  main(process.argv.slice(2)).then((code) => process.exit(code));
+  // Set exitCode and let the loop drain rather than calling process.exit() abruptly — an abrupt
+  // exit while the keyring native module has an open handle trips a libuv assertion on Windows.
+  main(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }
