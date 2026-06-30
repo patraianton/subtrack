@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AccountConfig, NormalizedUsage } from './types.ts';
 import { loadConfig, saveConfig, addAccount, removeAccount, renameAccount, configDir } from './config.ts';
@@ -62,10 +63,31 @@ async function cmdCheck(base: string): Promise<number> {
   return usages.some((u) => u.status === 'auth_error') ? 1 : 0;
 }
 
+/** Best-effort account email so the user can tell accounts apart (from the isolated home). */
+async function accountEmail(a: AccountConfig): Promise<string> {
+  if (!a.credentialsHome) return '';
+  try {
+    if (a.provider === 'claude') {
+      const cj = JSON.parse(await readFile(join(a.credentialsHome, '.claude.json'), 'utf8')) as { oauthAccount?: { emailAddress?: string } };
+      return cj.oauthAccount?.emailAddress ?? '';
+    }
+    const auth = JSON.parse(await readFile(join(a.credentialsHome, 'auth.json'), 'utf8')) as { tokens?: { id_token?: string } };
+    const idToken = auth.tokens?.id_token;
+    if (idToken) {
+      const payload = JSON.parse(Buffer.from(idToken.split('.')[1] ?? '', 'base64url').toString('utf8')) as { email?: string };
+      return payload.email ?? '';
+    }
+  } catch {
+    /* email unavailable — fine */
+  }
+  return '';
+}
+
 async function cmdList(base: string): Promise<number> {
   const cfg = await loadConfig(base);
   for (const a of cfg.accounts) {
-    console.log(`${a.enabled ? '●' : '○'} ${a.id.padEnd(20)} ${a.provider.padEnd(7)} ${a.label}`);
+    const email = await accountEmail(a);
+    console.log(`${a.enabled ? '●' : '○'} ${a.id.padEnd(14)} ${a.provider.padEnd(7)} ${email.padEnd(28)} ${a.label}`);
   }
   return 0;
 }
