@@ -59,10 +59,10 @@ test('refresh failure surfaces an error', async () => {
   await assert.rejects(() => auth.getAccessToken('c1'), /refresh failed/i);
 });
 
-test('buildAuthorizeUrl targets platform.claude.com with pkce + login scopes', () => {
+test('buildAuthorizeUrl targets the consumer subscription flow with pkce + login scopes', () => {
   const url = new URL(buildAuthorizeUrl('CHAL', 'STATE'));
-  assert.equal(url.origin, 'https://platform.claude.com'); // NOT claude.ai / console.anthropic.com
-  assert.equal(url.pathname, '/oauth/authorize');
+  assert.equal(url.origin, 'https://claude.com');     // SUBSCRIPTION flow, NOT platform.claude.com (API console)
+  assert.equal(url.pathname, '/cai/oauth/authorize');
   assert.equal(url.searchParams.get('code'), 'true');
   assert.equal(url.searchParams.get('response_type'), 'code');
   assert.equal(url.searchParams.get('redirect_uri'), 'https://platform.claude.com/oauth/code/callback');

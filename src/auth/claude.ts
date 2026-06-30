@@ -1,11 +1,12 @@
 import type { SecretStore } from '../secrets.ts';
 
 export const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-// Hosts + login scopes verified against the installed Claude Code binary (2026-06-30).
-// Anthropic migrated the OAuth flow to platform.claude.com; the old claude.ai /
-// console.anthropic.com hosts and the org:create_api_key (setup-token) scope produce
-// "Authorization failed — Invalid request format".
-export const CLAUDE_AUTHORIZE_URL = 'https://platform.claude.com/oauth/authorize';
+// Verified against the installed Claude Code binary (2026-06-30). Claude Code has TWO OAuth
+// configs: the consumer SUBSCRIPTION flow (authorize on claude.com/cai/...) and the API/CONSOLE
+// flow (authorize on platform.claude.com/oauth/authorize). subtrack reads SUBSCRIPTION usage, so
+// it MUST use the subscription authorize URL — the console one logs into the API platform instead.
+// Token exchange + the manual code-display callback are shared on platform.claude.com.
+export const CLAUDE_AUTHORIZE_URL = 'https://claude.com/cai/oauth/authorize';
 export const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 export const CLAUDE_REDIRECT_URI = 'https://platform.claude.com/oauth/code/callback';
 export const CLAUDE_SCOPES = 'user:profile user:inference user:sessions:claude_code user:mcp_servers';
