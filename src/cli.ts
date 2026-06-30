@@ -148,7 +148,7 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
       return 2;
     }
     const acc: AccountConfig = { id: id!, label: id!, provider: 'claude', enabled: true, credentialsHome: home };
-    acc.label = labelFlag ?? (await accountEmail(acc)) || id!; // default the label to the account's email
+    acc.label = labelFlag ?? ((await accountEmail(acc)) || id!); // default the label to the account's email
     await saveConfig(addAccount(cfg, acc), base);
     console.log(`Added Claude account ${id} (${acc.label}) — isolated; subtrack auto-refreshes it (no manual rotation).`);
   } else {
@@ -158,7 +158,7 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
     const spec = buildCodexLogin(home);
     await runInteractive(spec.cmd, spec.args, spec.env);
     const acc: AccountConfig = { id: id!, label: id!, provider: 'codex', enabled: true, credentialsHome: home };
-    acc.label = labelFlag ?? (await accountEmail(acc)) || id!; // default the label to the account's email
+    acc.label = labelFlag ?? ((await accountEmail(acc)) || id!); // default the label to the account's email
     await saveConfig(addAccount(cfg, acc), base);
     console.log(`Added Codex account ${id} (${acc.label}).`);
   }
