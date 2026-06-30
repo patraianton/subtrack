@@ -59,12 +59,20 @@ test('refresh failure surfaces an error', async () => {
   await assert.rejects(() => auth.getAccessToken('c1'), /refresh failed/i);
 });
 
-test('buildAuthorizeUrl includes pkce + client_id + profile scope', () => {
+test('buildAuthorizeUrl targets platform.claude.com with pkce + login scopes', () => {
   const url = new URL(buildAuthorizeUrl('CHAL', 'STATE'));
+  assert.equal(url.origin, 'https://platform.claude.com'); // NOT claude.ai / console.anthropic.com
+  assert.equal(url.pathname, '/oauth/authorize');
+  assert.equal(url.searchParams.get('code'), 'true');
+  assert.equal(url.searchParams.get('response_type'), 'code');
+  assert.equal(url.searchParams.get('redirect_uri'), 'https://platform.claude.com/oauth/code/callback');
   assert.equal(url.searchParams.get('code_challenge'), 'CHAL');
   assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(url.searchParams.get('state'), 'STATE');
-  assert.match(url.searchParams.get('scope') ?? '', /user:profile/);
+  const scope = url.searchParams.get('scope') ?? '';
+  assert.match(scope, /user:profile/);
+  assert.match(scope, /user:sessions:claude_code/); // login scope set, not the setup-token org:create_api_key
+  assert.doesNotMatch(scope, /org:create_api_key/);
   assert.ok(url.searchParams.get('client_id'));
 });
 
