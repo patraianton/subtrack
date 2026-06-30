@@ -117,7 +117,7 @@ async function cmdRename(base: string, id: string, label: string): Promise<numbe
 async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
   const id = args.positionals[0];
   const provider = args.flags.provider;
-  const label = typeof args.flags.label === 'string' ? args.flags.label : id;
+  const labelFlag = typeof args.flags.label === 'string' ? args.flags.label : undefined;
   if (!id || (provider !== 'claude' && provider !== 'codex')) {
     console.error('Usage: subtrack add-account <id> --provider claude|codex [--label "..."]');
     return 2;
@@ -147,18 +147,20 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
       console.error(`No login credentials found in ${home}. Did you complete /login? Re-run add-account (it resumes).`);
       return 2;
     }
-    const acc: AccountConfig = { id: id!, label: label!, provider: 'claude', enabled: true, credentialsHome: home };
+    const acc: AccountConfig = { id: id!, label: id!, provider: 'claude', enabled: true, credentialsHome: home };
+    acc.label = labelFlag ?? (await accountEmail(acc)) || id!; // default the label to the account's email
     await saveConfig(addAccount(cfg, acc), base);
-    console.log(`Added Claude account ${id} — isolated; subtrack auto-refreshes it (no manual rotation).`);
+    console.log(`Added Claude account ${id} (${acc.label}) — isolated; subtrack auto-refreshes it (no manual rotation).`);
   } else {
     const home = codexHomeDir(configDir(base), id!);
     await mkdir(home, { recursive: true });
     console.log(`\nLaunching: codex login (CODEX_HOME=${home}). Log in as this Codex account.\n`);
     const spec = buildCodexLogin(home);
     await runInteractive(spec.cmd, spec.args, spec.env);
-    const acc: AccountConfig = { id: id!, label: label!, provider: 'codex', enabled: true, credentialsHome: home };
+    const acc: AccountConfig = { id: id!, label: id!, provider: 'codex', enabled: true, credentialsHome: home };
+    acc.label = labelFlag ?? (await accountEmail(acc)) || id!; // default the label to the account's email
     await saveConfig(addAccount(cfg, acc), base);
-    console.log(`Added Codex account ${id}.`);
+    console.log(`Added Codex account ${id} (${acc.label}).`);
   }
   return 0;
 }
