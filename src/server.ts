@@ -41,7 +41,10 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
       }
       const file = url === '/' ? 'index.html' : url.replace(/^\//, '');
       const full = normalize(join(opts.webDir, file));
-      const safeBase = normalize(opts.webDir) + sep;
+      // Exactly one trailing separator — webDir may arrive with or without one (serve() passes a
+      // trailing-slash path); doubling the sep would 403 every request, an absent sep weakens the guard.
+      const root = normalize(opts.webDir);
+      const safeBase = root.endsWith(sep) ? root : root + sep;
       if (!full.startsWith(safeBase)) { res.writeHead(403).end('forbidden'); return; }
       const data = await readFile(full);
       res.writeHead(200, { 'content-type': MIME[extname(full)] ?? 'application/octet-stream' }).end(data);
