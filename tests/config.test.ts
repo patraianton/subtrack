@@ -3,8 +3,17 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_CONFIG, loadConfig, saveConfig, addAccount, removeAccount } from '../src/config.ts';
+import { DEFAULT_CONFIG, loadConfig, saveConfig, addAccount, removeAccount, renameAccount } from '../src/config.ts';
 import type { AccountConfig } from '../src/types.ts';
+
+test('renameAccount changes only the matching account label', () => {
+  const a: AccountConfig = { id: 'a', label: 'A', provider: 'claude', enabled: true };
+  const b: AccountConfig = { id: 'b', label: 'B', provider: 'codex', enabled: true };
+  const cfg = addAccount(addAccount({ ...DEFAULT_CONFIG }, a), b);
+  const after = renameAccount(cfg, 'a', 'Work — Acme');
+  assert.equal(after.accounts.find((x) => x.id === 'a')?.label, 'Work — Acme');
+  assert.equal(after.accounts.find((x) => x.id === 'b')?.label, 'B'); // untouched
+});
 
 async function withTempBase(fn: (base: string) => Promise<void>) {
   const base = await mkdtemp(join(tmpdir(), 'subtrack-'));

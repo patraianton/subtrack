@@ -45,3 +45,7 @@ export function addAccount(cfg: SubtrackConfig, acc: AccountConfig): SubtrackCon
 export function removeAccount(cfg: SubtrackConfig, id: string): SubtrackConfig {
   return { ...cfg, accounts: cfg.accounts.filter((a) => a.id !== id) };
 }
+
+export function renameAccount(cfg: SubtrackConfig, id: string, label: string): SubtrackConfig {
+  return { ...cfg, accounts: cfg.accounts.map((a) => (a.id === id ? { ...a, label } : a)) };
+}

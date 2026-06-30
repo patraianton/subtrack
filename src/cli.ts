@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import type { AccountConfig, NormalizedUsage } from './types.ts';
-import { loadConfig, saveConfig, addAccount, removeAccount, configDir } from './config.ts';
+import { loadConfig, saveConfig, addAccount, removeAccount, renameAccount, configDir } from './config.ts';
 import { claudeHomeDir, buildClaudeLogin, readClaudeOauth } from './auth/claude.ts';
 import { codexHomeDir, buildCodexLogin } from './auth/codex.ts';
 import { makeFetchUsage } from './adapters/index.ts';
@@ -77,6 +77,21 @@ async function cmdRemove(base: string, id: string): Promise<number> {
   return 0;
 }
 
+async function cmdRename(base: string, id: string, label: string): Promise<number> {
+  if (!id || !label) {
+    console.error('Usage: subtrack rename <id> "<new name>"   (or --label "<new name>")');
+    return 2;
+  }
+  const cfg = await loadConfig(base);
+  if (!cfg.accounts.some((a) => a.id === id)) {
+    console.error(`No account "${id}". Run \`list\` to see ids.`);
+    return 2;
+  }
+  await saveConfig(renameAccount(cfg, id, label), base);
+  console.log(`Renamed ${id} → "${label}"  (restart the dashboard to see it)`);
+  return 0;
+}
+
 async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
   const id = args.positionals[0];
   const provider = args.flags.provider;
@@ -132,10 +147,11 @@ export async function main(argv: string[], base: string = homedir()): Promise<nu
     case 'check': return cmdCheck(base);
     case 'list': return cmdList(base);
     case 'remove-account': return cmdRemove(base, args.positionals[0] ?? '');
+    case 'rename': return cmdRename(base, args.positionals[0] ?? '', args.positionals.slice(1).join(' ') || (typeof args.flags.label === 'string' ? args.flags.label : ''));
     case 'add-account': return cmdAddAccount(base, args);
     case 'serve': { const { serve } = await import('./server.ts'); return serve(base); }
     default:
-      console.log('Commands: serve | check | list | add-account <id> --provider claude|codex | remove-account <id>');
+      console.log('Commands: serve | check | list | add-account <id> --provider claude|codex | rename <id> "<name>" | remove-account <id>');
       return args.cmd ? 1 : 0;
   }
 }
