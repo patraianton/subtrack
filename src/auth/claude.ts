@@ -1,15 +1,11 @@
 import type { SecretStore } from '../secrets.ts';
 
 export const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-// Verified against the installed Claude Code binary (2026-06-30). Claude Code has TWO OAuth
-// configs: the consumer SUBSCRIPTION flow (authorize on claude.com/cai/...) and the API/CONSOLE
-// flow (authorize on platform.claude.com/oauth/authorize). subtrack reads SUBSCRIPTION usage, so
-// it MUST use the subscription authorize URL — the console one logs into the API platform instead.
-// Token exchange + the manual code-display callback are shared on platform.claude.com.
-export const CLAUDE_AUTHORIZE_URL = 'https://claude.com/cai/oauth/authorize';
-export const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
-export const CLAUDE_REDIRECT_URI = 'https://platform.claude.com/oauth/code/callback';
-export const CLAUDE_SCOPES = 'user:profile user:inference user:sessions:claude_code user:mcp_servers';
+// subtrack does NOT run an OAuth web flow — Claude Code mints the token (`claude setup-token`)
+// and the user pastes the bare `sk-ant-oat01-…` access token. This refresh endpoint is only used
+// if we ever hold a refresh token (sk-ant-ort01-…); bare setup-tokens have none and are treated
+// as long-lived. (Endpoint per Aperant's reference impl.)
+export const CLAUDE_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const DEFAULT_EXPIRES_IN = 28800; // 8h fallback if server omits expires_in
 const EXPIRY_SKEW_MS = 60_000;
 
@@ -24,19 +20,6 @@ export function claudeCredKey(id: string): string {
   return `subtrack/${id}`;
 }
 
-export function buildAuthorizeUrl(challenge: string, state: string): string {
-  const u = new URL(CLAUDE_AUTHORIZE_URL);
-  u.searchParams.set('code', 'true');
-  u.searchParams.set('client_id', CLAUDE_CLIENT_ID);
-  u.searchParams.set('response_type', 'code');
-  u.searchParams.set('redirect_uri', CLAUDE_REDIRECT_URI);
-  u.searchParams.set('scope', CLAUDE_SCOPES);
-  u.searchParams.set('code_challenge', challenge);
-  u.searchParams.set('code_challenge_method', 'S256');
-  u.searchParams.set('state', state);
-  return u.toString();
-}
-
 function parseTokenResponse(json: Record<string, unknown>, refreshFallback: string, clock: () => number): ClaudeCreds {
   return {
     accessToken: String(json['access_token']),
@@ -44,30 +27,6 @@ function parseTokenResponse(json: Record<string, unknown>, refreshFallback: stri
     expiresAt: clock() + (typeof json['expires_in'] === 'number' ? (json['expires_in'] as number) : DEFAULT_EXPIRES_IN) * 1000,
     scopes: typeof json['scope'] === 'string' ? (json['scope'] as string).split(' ') : undefined,
   };
-}
-
-export async function exchangeCode(
-  code: string,
-  verifier: string,
-  deps: { fetchImpl?: typeof fetch; clock?: () => number } = {},
-): Promise<ClaudeCreds> {
-  const f = deps.fetchImpl ?? fetch;
-  const clock = deps.clock ?? Date.now;
-  // The manual-paste flow returns "<code>#<state>"; keep only the code part.
-  const codeOnly = code.split('#')[0]!.trim();
-  const res = await f(CLAUDE_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'authorization_code',
-      code: codeOnly,
-      redirect_uri: CLAUDE_REDIRECT_URI,
-      client_id: CLAUDE_CLIENT_ID,
-      code_verifier: verifier,
-    }),
-  });
-  if (!res.ok) throw new Error(`Claude code exchange failed: HTTP ${res.status}`);
-  return parseTokenResponse((await res.json()) as Record<string, unknown>, '', clock);
 }
 
 export class ClaudeAuth {

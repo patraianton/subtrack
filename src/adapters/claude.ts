@@ -2,7 +2,6 @@ import type { AccountConfig, NormalizedUsage, UsageWindow } from '../types.ts';
 import { baseUsage } from './shell.ts';
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-const DEFAULT_CLIENT_VERSION = '2.0.65';
 
 function toWindow(raw: unknown): UsageWindow | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -36,12 +35,14 @@ export interface ClaudeFetchDeps {
 
 async function callUsage(token: string, deps: ClaudeFetchDeps): Promise<Response> {
   const f = deps.fetchImpl ?? fetch;
+  // Header set proven by Aperant's reference impl: a bare `sk-ant-oat01-…` setup-token
+  // reads /api/oauth/usage with these headers (no User-Agent needed).
   return f(USAGE_URL, {
     headers: {
       authorization: `Bearer ${token}`,
-      'anthropic-beta': 'oauth-2025-04-20',
-      'user-agent': `claude-code/${deps.clientVersion ?? DEFAULT_CLIENT_VERSION}`,
       'content-type': 'application/json',
+      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+      'anthropic-version': '2023-06-01',
     },
   });
 }
@@ -56,10 +57,10 @@ export async function fetchClaudeUsage(account: AccountConfig, deps: ClaudeFetch
       res = await callUsage(token, deps);
     }
     if (res.status === 403) {
-      return { ...shell, status: 'auth_error', error: 'Token lacks user:profile scope — re-run add-account (setup-tokens cannot read usage)' };
+      return { ...shell, status: 'auth_error', error: 'Token rejected (403) — re-run add-account with a fresh `claude setup-token`' };
     }
     if (res.status === 401) {
-      return { ...shell, status: 'auth_error', error: 'Unauthorized after refresh — re-login with add-account' };
+      return { ...shell, status: 'auth_error', error: 'Token expired/invalid (401) — re-run add-account with a fresh `claude setup-token`' };
     }
     if (res.status === 429) {
       return { ...shell, status: 'throttled', error: 'Rate limited (HTTP 429)' };

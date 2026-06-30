@@ -37,11 +37,11 @@ test('fetchClaudeUsage returns normalized data on 200', async () => {
   assert.equal(u.weekly?.utilization, 41);
 });
 
-test('fetchClaudeUsage maps 403 to auth_error mentioning user:profile', async () => {
+test('fetchClaudeUsage maps 403 to auth_error pointing at setup-token', async () => {
   const fetchImpl = (async () => new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
   const u = await fetchClaudeUsage(ACC, { getAccessToken: async () => 'tok', fetchImpl }, NOW);
   assert.equal(u.status, 'auth_error');
-  assert.match(u.error ?? '', /user:profile/);
+  assert.match(u.error ?? '', /setup-token/);
 });
 
 test('fetchClaudeUsage maps 429 to throttled', async () => {
@@ -70,9 +70,9 @@ test('fetchClaudeUsage sends required headers', async () => {
     seen = new Headers(init?.headers);
     return new Response('{}', { status: 200 });
   }) as unknown as typeof fetch;
-  await fetchClaudeUsage(ACC, { getAccessToken: async () => 'tok', fetchImpl, clientVersion: '2.0.65' }, NOW);
-  assert.equal(seen?.get('anthropic-beta'), 'oauth-2025-04-20');
-  assert.equal(seen?.get('user-agent'), 'claude-code/2.0.65');
+  await fetchClaudeUsage(ACC, { getAccessToken: async () => 'tok', fetchImpl }, NOW);
+  assert.equal(seen?.get('anthropic-beta'), 'claude-code-20250219,oauth-2025-04-20');
+  assert.equal(seen?.get('anthropic-version'), '2023-06-01');
   assert.equal(seen?.get('authorization'), 'Bearer tok');
   assert.equal(seen?.get('content-type'), 'application/json');
 });
