@@ -86,18 +86,28 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
     return 2;
   }
   const cfg = await loadConfig(base);
+  if (cfg.accounts.some((a) => a.id === id)) {
+    console.error(`Account "${id}" already exists — run \`remove-account ${id}\` first to redo it.`);
+    return 2;
+  }
   if (provider === 'claude') {
     // Isolated CLAUDE_CONFIG_DIR per account: log Claude Code in HERE so subtrack owns this account's
     // token (separate from the user's main ~/.claude) and can auto-refresh it forever without conflict.
     const home = claudeHomeDir(configDir(base), id!);
     await mkdir(home, { recursive: true });
-    console.log(`\nLaunching Claude Code with an isolated config (CLAUDE_CONFIG_DIR=${home}).`);
-    console.log(`In it: run  /login , sign in as the "${id}" account, then  /exit  (or Ctrl-C). subtrack will own this token.\n`);
-    const spec = buildClaudeLogin(home);
-    await runInteractive(spec.cmd, spec.args, spec.env);
-    const oauth = await readClaudeOauth(home);
+    // Idempotent: if this home already has a login (e.g. a prior run was Ctrl-C'd before it could
+    // register), skip the interactive login and just register what's there.
+    let oauth = await readClaudeOauth(home);
     if (!oauth?.accessToken) {
-      console.error(`No login credentials found in ${home}. Did you complete /login? Re-run add-account.`);
+      console.log(`\nLaunching Claude Code with an isolated config (CLAUDE_CONFIG_DIR=${home}).`);
+      console.log(`In it: run  /login , sign in as the "${id}" account, then type  /exit  to return.`);
+      console.log(`(Use /exit — pressing Ctrl-C cancels onboarding. If that happens, just re-run this command; it resumes.)\n`);
+      const spec = buildClaudeLogin(home);
+      await runInteractive(spec.cmd, spec.args, spec.env);
+      oauth = await readClaudeOauth(home);
+    }
+    if (!oauth?.accessToken) {
+      console.error(`No login credentials found in ${home}. Did you complete /login? Re-run add-account (it resumes).`);
       return 2;
     }
     const acc: AccountConfig = { id: id!, label: label!, provider: 'claude', enabled: true, credentialsHome: home };
