@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fetchWithRetry } from '../adapters/http.ts';
 
 export const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 // Token refresh endpoint + form-encoded body verified against the installed Claude Code binary
@@ -77,7 +78,7 @@ export class ClaudeAuth {
   }
 
   private async refresh(refreshToken: string): Promise<ClaudeAiOauth> {
-    const res = await this.fetchImpl(CLAUDE_TOKEN_URL, {
+    const res = await fetchWithRetry(CLAUDE_TOKEN_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -85,7 +86,7 @@ export class ClaudeAuth {
         refresh_token: refreshToken,
         client_id: CLAUDE_CLIENT_ID,
       }).toString(),
-    });
+    }, { fetchImpl: this.fetchImpl });
     if (!res.ok) throw new Error(`Claude token refresh failed: HTTP ${res.status}`);
     const j = (await res.json()) as Record<string, unknown>;
     return {
