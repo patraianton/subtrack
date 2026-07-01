@@ -1,5 +1,6 @@
 import type { AccountConfig, NormalizedUsage, UsageWindow } from '../types.ts';
 import { baseUsage } from './shell.ts';
+import { fetchWithRetry } from './http.ts';
 
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const SESSION_SECONDS = 18_000;   // 5-hour window  (verified live, Task 9 spike)
@@ -65,10 +66,9 @@ export async function fetchCodexUsage(account: AccountConfig, deps: CodexFetchDe
   }
   try {
     const { accessToken, accountId } = await deps.readAuth(account.credentialsHome);
-    const f = deps.fetchImpl ?? fetch;
-    const res = await f(USAGE_URL, {
+    const res = await fetchWithRetry(USAGE_URL, {
       headers: { authorization: `Bearer ${accessToken}`, 'chatgpt-account-id': accountId },
-    });
+    }, { fetchImpl: deps.fetchImpl });
     if (res.status === 401) {
       return { ...shell, status: 'auth_error', error: `Codex token expired — run: codex login (CODEX_HOME=${account.credentialsHome})` };
     }
