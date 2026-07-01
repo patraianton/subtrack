@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, formatCheckTable } from '../src/cli.ts';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parseArgs, formatCheckTable, main } from '../src/cli.ts';
 import type { NormalizedUsage } from '../src/types.ts';
 
 test('parseArgs splits command, positionals, and flags', () => {
@@ -31,4 +34,19 @@ test('formatCheckTable renders one row per account with percentages', () => {
   assert.match(table, /62%/);
   assert.match(table, /41%/);
   assert.match(table, /auth_error/);
+});
+
+test('main resolves to exit 1 (never an unhandled rejection) when accounts.json is corrupt', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'subtrack-'));
+  const origError = console.error;
+  console.error = () => {}; // silence the expected one-line error message during the test
+  try {
+    await mkdir(join(base, '.subtrack'), { recursive: true });
+    await writeFile(join(base, '.subtrack', 'accounts.json'), '{ not valid json', 'utf8');
+    // `status` loads config first; a corrupt file must resolve to 1, not throw past main().
+    assert.equal(await main(['status'], base), 1);
+  } finally {
+    console.error = origError;
+    await rm(base, { recursive: true, force: true });
+  }
 });

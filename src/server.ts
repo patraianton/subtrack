@@ -63,7 +63,12 @@ function json(res: ServerResponse, body: unknown): void {
   res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
 }
 
-export async function serve(base: string = homedir()): Promise<number> {
+/** Whether to auto-open a browser: explicit opts win, else honour SUBTRACK_NO_OPEN (set by the daemon). */
+export function shouldOpenBrowser(opts: { open?: boolean }, env: NodeJS.ProcessEnv = process.env): boolean {
+  return opts.open ?? env.SUBTRACK_NO_OPEN !== '1';
+}
+
+export async function serve(base: string = homedir(), opts: { open?: boolean } = {}): Promise<number> {
   const cfg = await loadConfig(base);
   const store = new SnapshotStore();
   const fetchUsage = makeFetchUsage();
@@ -71,9 +76,15 @@ export async function serve(base: string = homedir()): Promise<number> {
   poller.start();
   const webDir = fileURLToPath(new URL('../web/', import.meta.url)); // decode %20 etc — never use .pathname on Windows
   const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds });
-  await new Promise<void>((r) => server.listen(cfg.port, '127.0.0.1', r));
+  // Reject (rather than hang) if the port is taken — the daemon supervisor reacts to the non-zero exit.
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => reject(err);
+    server.once('error', onError);
+    server.listen(cfg.port, '127.0.0.1', () => { server.off('error', onError); resolve(); });
+  });
+  server.on('error', (err) => console.error(`server error: ${err.message}`));
   const dashUrl = `http://localhost:${cfg.port}`;
   console.log(`subtrack dashboard → ${dashUrl}  (polling ${cfg.accounts.filter((a) => a.enabled).length} accounts)`);
-  await open(dashUrl);
+  if (shouldOpenBrowser(opts)) await open(dashUrl);
   return await new Promise<number>(() => { /* run until killed */ });
 }
