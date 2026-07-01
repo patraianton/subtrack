@@ -29,9 +29,22 @@ function card(u, now) {
   const note = notes.length ? `<div class="err">${esc(notes.join(' · '))}</div>` : '';
   const ts = u.lastUpdated ? `<span class="cardts">${new Date(u.lastUpdated).toLocaleTimeString()}</span>` : '';
   const stale = isStale(u, now) ? ' stale' : '';
-  return `<section class="card ${u.status}${stale}">`
-    + `<div class="card-head"><span class="badge">${u.provider}</span><span class="label">${esc(u.label)}</span>${ts}<span class="dot ${u.status}"></span></div>`
+  return `<section class="card ${u.provider} ${u.status}${stale}">`
+    + `<div class="card-head"><span class="badge ${u.provider}">${u.provider}</span><span class="label">${esc(u.label)}</span>${ts}<span class="dot ${u.status}"></span></div>`
     + gauge('session', u.session, now) + gauge('weekly', u.weekly, now) + opus + note + `</section>`;
+}
+
+// Group cards by provider (Claude first, then Codex), keeping the server's tightest-first order within
+// each group. A full-width header before each group forces the next provider onto a new grid row.
+const PROVIDER_ORDER = { claude: 0, codex: 1 };
+function renderGrouped(accounts, now) {
+  const ordered = [...accounts].sort((a, b) => (PROVIDER_ORDER[a.provider] ?? 9) - (PROVIDER_ORDER[b.provider] ?? 9));
+  let html = '', group = null;
+  for (const u of ordered) {
+    if (u.provider !== group) { group = u.provider; html += `<h2 class="group ${group}">${group}</h2>`; }
+    html += card(u, now);
+  }
+  return html;
 }
 
 function tightest(accounts) {
@@ -51,7 +64,7 @@ async function refresh() {
     refreshMs = (data.uiRefreshSeconds || 30) * 1000;
     if (data.pollIntervalSeconds) pollSecs = data.pollIntervalSeconds;
     const now = Date.now();
-    cardsEl.innerHTML = data.accounts.map((u) => card(u, now)).join('');
+    cardsEl.innerHTML = renderGrouped(data.accounts, now);
     summaryEl.textContent = tightest(data.accounts);
     updatedEl.textContent = `updated ${new Date(now).toLocaleTimeString()}`;
   } catch {
