@@ -167,16 +167,34 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
 
 export async function main(argv: string[], base: string = homedir()): Promise<number> {
   const args = parseArgs(argv);
-  switch (args.cmd) {
-    case 'check': return cmdCheck(base);
-    case 'list': return cmdList(base);
-    case 'remove-account': return cmdRemove(base, args.positionals[0] ?? '');
-    case 'rename': return cmdRename(base, args.positionals[0] ?? '', args.positionals.slice(1).join(' ') || (typeof args.flags.label === 'string' ? args.flags.label : ''));
-    case 'add-account': return cmdAddAccount(base, args);
-    case 'serve': { const { serve } = await import('./server.ts'); return serve(base); }
-    default:
-      console.log('Commands: serve | check | list | add-account <id> --provider claude|codex | rename <id> "<name>" | remove-account <id>');
-      return args.cmd ? 1 : 0;
+  // One place turns any thrown error (bad config JSON, PowerShell/FS failure, a port already taken)
+  // into a clean one-line message + exit 1, instead of an unhandled-rejection stack trace.
+  try {
+    switch (args.cmd) {
+      case 'check': return await cmdCheck(base);
+      case 'list': return await cmdList(base);
+      case 'remove-account': return await cmdRemove(base, args.positionals[0] ?? '');
+      case 'rename': return await cmdRename(base, args.positionals[0] ?? '', args.positionals.slice(1).join(' ') || (typeof args.flags.label === 'string' ? args.flags.label : ''));
+      case 'add-account': return await cmdAddAccount(base, args);
+      case 'serve': {
+        const { serve } = await import('./server.ts');
+        const noOpen = args.flags['no-open'] === true || process.env.SUBTRACK_NO_OPEN === '1';
+        return await serve(base, { open: !noOpen });
+      }
+      case 'daemon': { const { runDaemon } = await import('./daemon.ts'); return await runDaemon(base); }
+      case 'install': { const { installDaemon } = await import('./install.ts'); return await installDaemon(base); }
+      case 'uninstall': { const { uninstallDaemon } = await import('./install.ts'); return await uninstallDaemon(base); }
+      case 'start': { const { startDaemon } = await import('./install.ts'); return await startDaemon(base); }
+      case 'stop': { const { stopDaemon } = await import('./install.ts'); return await stopDaemon(base); }
+      case 'status': { const { daemonStatus } = await import('./install.ts'); return await daemonStatus(base); }
+      case 'logs': { const { showLogs } = await import('./install.ts'); return await showLogs(base, Number(args.flags.lines) || 40); }
+      default:
+        console.log('Commands: serve | check | list | add-account <id> --provider claude|codex | rename <id> "<name>" | remove-account <id>\n         install | uninstall | start | stop | status | logs   (always-on background dashboard)');
+        return args.cmd ? 1 : 0;
+    }
+  } catch (e) {
+    console.error(`subtrack ${args.cmd}: ${(e as Error)?.message ?? String(e)}`);
+    return 1;
   }
 }
 
@@ -186,5 +204,9 @@ const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   // Set exitCode and let the loop drain rather than calling process.exit() abruptly — an abrupt
   // exit while the keyring native module has an open handle trips a libuv assertion on Windows.
-  main(process.argv.slice(2)).then((code) => { process.exitCode = code; });
+  // The .catch() turns any thrown error (e.g. a corrupt accounts.json from loadConfig) into a clean
+  // one-line message + exit 1 instead of an unhandled-rejection stack trace.
+  main(process.argv.slice(2))
+    .then((code) => { process.exitCode = code; })
+    .catch((e: unknown) => { console.error((e as Error)?.message ?? String(e)); process.exitCode = 1; });
 }
