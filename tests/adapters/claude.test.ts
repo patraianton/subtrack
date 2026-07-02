@@ -29,6 +29,14 @@ test('normalizeClaudeUsage tolerates missing windows', () => {
   assert.equal(u.weeklyOpus, null);
 });
 
+test('normalizeClaudeUsage keeps resets_at null (freshly-reset window) instead of faking epoch 0', () => {
+  // Real post-Fable-reset shape: the window is present at 0% but resets_at is null.
+  const u = normalizeClaudeUsage({ five_hour: { utilization: 0, resets_at: null }, seven_day: { utilization: 0, resets_at: null } }, ACC, NOW);
+  assert.equal(u.session?.utilization, 0);
+  assert.equal(u.session?.resetsAt, null);   // not '1970-01-01…' which renders as a bogus "resets now"
+  assert.equal(u.weekly?.resetsAt, null);
+});
+
 test('fetchClaudeUsage returns normalized data on 200', async () => {
   const body = await fixture();
   const fetchImpl = (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;

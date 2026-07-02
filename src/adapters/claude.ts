@@ -8,7 +8,9 @@ function toWindow(raw: unknown): UsageWindow | null {
   if (!raw || typeof raw !== 'object') return null;
   const w = raw as { utilization?: unknown; resets_at?: unknown };
   if (typeof w.utilization !== 'number') return null;
-  const resetsAt = typeof w.resets_at === 'string' ? new Date(w.resets_at).toISOString() : new Date(0).toISOString();
+  // The API sends resets_at: null for a freshly-reset / 0% window (seen after the Fable-launch
+  // global reset). Keep it null — faking epoch 0 rendered as a misleading "resets now".
+  const resetsAt = typeof w.resets_at === 'string' ? new Date(w.resets_at).toISOString() : null;
   return { utilization: w.utilization, resetsAt };
 }
 

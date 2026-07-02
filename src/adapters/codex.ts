@@ -13,7 +13,9 @@ interface RawRateLimit { primary_window?: RawWindow; secondary_window?: RawWindo
 
 function toWindow(w: RawWindow | undefined): UsageWindow | null {
   if (!w || typeof w.used_percent !== 'number') return null;
-  return { utilization: w.used_percent, resetsAt: new Date((w.reset_at ?? 0) * 1000).toISOString() };
+  // Null reset when the API omits reset_at, rather than faking epoch 0 (renders as "resets now").
+  const resetsAt = typeof w.reset_at === 'number' ? new Date(w.reset_at * 1000).toISOString() : null;
+  return { utilization: w.used_percent, resetsAt };
 }
 
 // Assign each present window to session (≈5h) or weekly (≈7d) by its limit_window_seconds,

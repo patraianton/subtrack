@@ -1,5 +1,8 @@
 export function formatCountdown(resetsAtIso, nowMs) {
-  const diff = new Date(resetsAtIso).getTime() - nowMs;
+  if (!resetsAtIso) return '—'; // reset time not yet known (API sent null — freshly-reset window)
+  const t = new Date(resetsAtIso).getTime();
+  if (!Number.isFinite(t)) return '—';
+  const diff = t - nowMs;
   if (diff <= 0) return 'now';
   const totalMin = Math.floor(diff / 60000);
   if (totalMin < 60) return `${totalMin}m`;
