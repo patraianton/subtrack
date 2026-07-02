@@ -3,8 +3,9 @@ export type UsageStatus = 'ok' | 'throttled' | 'auth_error' | 'error';
 export type Severity = 'ok' | 'warn' | 'crit';
 
 export interface UsageWindow {
-  utilization: number; // 0-100, percent used
-  resetsAt: string;    // ISO-8601 UTC
+  utilization: number;      // 0-100, percent used
+  resetsAt: string | null;  // ISO-8601 UTC, or null when the API hasn't anchored a reset yet
+                            // (e.g. a freshly-reset window at 0%) — must NOT be faked as epoch 0
 }
 
 export interface NormalizedUsage {

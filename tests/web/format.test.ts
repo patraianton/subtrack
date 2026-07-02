@@ -16,3 +16,8 @@ test('days and hours', () => {
 test('past resets show now', () => {
   assert.equal(formatCountdown('2026-06-29T11:59:00.000Z', now), 'now');
 });
+test('null/absent reset time shows an em-dash, not "now"', () => {
+  assert.equal(formatCountdown(null, now), '—');
+  assert.equal(formatCountdown(undefined, now), '—');
+  assert.equal(formatCountdown('not-a-date', now), '—');
+});
