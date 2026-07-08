@@ -23,6 +23,9 @@ h1 { font-size: 18px; margin: 0; }
 .label { font-weight: 600; }
 .dot { width: 8px; height: 8px; border-radius: 50%; margin-left: 8px; }
 .dot.ok { background: var(--ok); } .dot.throttled, .dot.error { background: var(--muted); } .dot.auth_error { background: var(--crit); }
+/* status=stale: read-only creds expired, waiting on their owner (the CLI) to refresh — a warning,
+   not a failure. Status also lands as a `stale` card class, so the data-age dimming below applies. */
+.dot.stale { background: var(--warn); }
 .cardts { margin-left: auto; color: var(--muted); font-size: 11px; }
 .card.stale { opacity: 0.5; }
 .gauge { margin: 8px 0; }

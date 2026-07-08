@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
 import { fetchWithRetry } from '../adapters/http.ts';
 
 export const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
@@ -43,10 +44,43 @@ export async function readClaudeOauth(home: string): Promise<ClaudeAiOauth | und
   }
 }
 
+/** Credentials exist but the access token is expired and only the external owner may refresh it. */
+export class StaleCredentialsError extends Error {}
+
+/**
+ * Read-only token source over an externally-owned home (e.g. a Claude Code CLI config dir, or a
+ * static setup-token file). Anthropic refresh tokens are SINGLE-USE — they rotate on every refresh,
+ * so a second process refreshing the same token orphans the first (incident 2026-07-08). This
+ * source makes that impossible by construction: it has no token-endpoint code, no fetch dependency,
+ * and never writes the file. On expiry it throws StaleCredentialsError — the owner (the CLI) is the
+ * only one allowed to refresh.
+ */
+export function makeReadOnlyTokenSource(home: string, clock: () => number = Date.now): { getAccessToken(): Promise<string> } {
+  return {
+    async getAccessToken(): Promise<string> {
+      const oauth = await readClaudeOauth(home);
+      if (!oauth?.accessToken) throw new Error(`No Claude credentials in ${claudeCredentialsPath(home)} — check the read-only home path`);
+      // A static setup-token has no expiresAt — treat it as always valid; a genuine 401 will surface.
+      if (typeof oauth.expiresAt === 'number' && oauth.expiresAt <= clock()) {
+        throw new StaleCredentialsError(
+          `Claude credentials stale (expired ${new Date(oauth.expiresAt).toISOString()}) — open a Claude Code session for this account to refresh them`,
+        );
+      }
+      return oauth.accessToken;
+    },
+  };
+}
+
+/** The only tree subtrack is allowed to rotate tokens in: homes it created itself via add-account. */
+export function defaultOwnedRoot(base: string = homedir()): string {
+  return join(base, '.subtrack', 'claude-homes');
+}
+
 export class ClaudeAuth {
   constructor(
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly clock: () => number = Date.now,
+    private readonly ownedRoot: string = defaultOwnedRoot(),
   ) {}
 
   /**
@@ -69,6 +103,15 @@ export class ClaudeAuth {
       // Either still valid, or we can't refresh (no refresh token) — return what we have and let
       // a genuine 401 on the usage call surface as auth_error.
       return oauth.accessToken;
+    }
+
+    // Double-ownership guard (incident 2026-07-08): refresh tokens are single-use, so rotating one
+    // that another process also holds (e.g. a Claude Code CLI home) permanently orphans that
+    // process. Refuse — before any network call — to refresh credentials subtrack doesn't own.
+    const root = resolve(this.ownedRoot);
+    const target = resolve(home);
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`refusing to refresh credentials outside ${root} — ${target} is a read-only source; only its owner may rotate its refresh token`);
     }
 
     const refreshed = await this.refresh(oauth.refreshToken);

@@ -1,4 +1,5 @@
 import type { AccountConfig, NormalizedUsage, UsageWindow } from '../types.ts';
+import { StaleCredentialsError } from '../auth/claude.ts';
 import { baseUsage } from './shell.ts';
 import { fetchWithRetry } from './http.ts';
 
@@ -86,11 +87,14 @@ export async function fetchClaudeUsage(account: AccountConfig, deps: ClaudeFetch
       token = await deps.getAccessToken(account.id, { force: true });
       res = await callUsage(token, deps);
     }
+    // For read-only sources the fix is at the source (a CLI session / a fresh setup-token), not
+    // re-running add-account — subtrack doesn't own those credentials.
+    const readonlyHint = 'read-only credential source — refresh it at the source (Claude Code CLI session or a new setup-token)';
     if (res.status === 403) {
-      return { ...shell, status: 'auth_error', error: 'Token rejected (403) — re-run add-account with a fresh `claude setup-token`' };
+      return { ...shell, status: 'auth_error', error: account.credentialsMode === 'readonly' ? `Token rejected (403) — ${readonlyHint}` : 'Token rejected (403) — re-run add-account with a fresh `claude setup-token`' };
     }
     if (res.status === 401) {
-      return { ...shell, status: 'auth_error', error: 'Token expired/invalid (401) — re-run add-account with a fresh `claude setup-token`' };
+      return { ...shell, status: 'auth_error', error: account.credentialsMode === 'readonly' ? `Token expired/invalid (401) — ${readonlyHint}` : 'Token expired/invalid (401) — re-run add-account with a fresh `claude setup-token`' };
     }
     if (res.status === 429) {
       return { ...shell, status: 'throttled', error: 'Rate limited (HTTP 429)' };
@@ -101,6 +105,10 @@ export async function fetchClaudeUsage(account: AccountConfig, deps: ClaudeFetch
     return normalizeClaudeUsage(await res.json(), account, now);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (e instanceof StaleCredentialsError) {
+      // Expired read-only token: only its owner (the CLI) may refresh it. Report, don't hammer.
+      return { ...shell, status: 'stale', error: msg };
+    }
     const isAuth = /refresh failed|no stored .*credentials|add-account/i.test(msg);
     return { ...shell, status: isAuth ? 'auth_error' : 'error', error: msg };
   }

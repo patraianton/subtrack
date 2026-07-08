@@ -73,6 +73,22 @@ Poller (staggered, per-account TTL)
 - **`src/thresholds.ts`** is the only place utilization → severity is decided (`≥90` crit, `≥70`
   warn). The server enriches windows with this; the web layer only styles by it.
 
+### Credential modes (incident 2026-07-08: refresh tokens are SINGLE-USE)
+Anthropic OAuth refresh tokens rotate on every refresh — two processes holding the same refresh
+token means whoever refreshes first permanently orphans the other. `AccountConfig.credentialsMode`
+encodes who owns the refresh token:
+
+- **`owned`** (default when the field is absent — legacy configs migrate as-is): subtrack created
+  the home via `add-account` login and is the sole owner → `ClaudeAuth` auto-refreshes + persists.
+- **`readonly`**: the home belongs to someone else — a live Claude Code CLI dir (e.g.
+  `~/.claude-accounts/<dir>`, registered via `add-account <id> --provider claude --readonly-home
+  <dir>`) or a static `claude setup-token` (via `--static-token`, token piped on stdin). The poller
+  re-reads the access token from the file every cycle through `makeReadOnlyTokenSource`, which has
+  **no refresh code, no fetch dependency, and never writes** — rotation is impossible by
+  construction. An expired file token surfaces as the `stale` status (no API call is made) until
+  the owner refreshes it. Defense in depth: `ClaudeAuth` refuses to refresh any home outside
+  `~/.subtrack/claude-homes`.
+
 ### The two providers differ mainly in auth
 Each account gets its **own isolated credential home** under `~/.subtrack/`, so subtrack never
 touches (or is touched by) your primary `~/.claude` or `~/.codex`:
