@@ -12,10 +12,11 @@ import { loadConfig } from './config.ts';
 import { makeFetchUsage } from './adapters/index.ts';
 
 export interface ApiWindow extends UsageWindow { severity: Severity }
-export interface EnrichedUsage extends Omit<NormalizedUsage, 'session' | 'weekly' | 'weeklyOpus'> {
+export interface EnrichedUsage extends Omit<NormalizedUsage, 'session' | 'weekly' | 'weeklyOpus' | 'fable'> {
   session: ApiWindow | null;
   weekly: ApiWindow | null;
   weeklyOpus: ApiWindow | null;
+  fable: ApiWindow | null;
 }
 
 function enrichWindow(w: UsageWindow | null): ApiWindow | null {
@@ -23,7 +24,7 @@ function enrichWindow(w: UsageWindow | null): ApiWindow | null {
 }
 
 export function enrichUsage(u: NormalizedUsage): EnrichedUsage {
-  return { ...u, session: enrichWindow(u.session), weekly: enrichWindow(u.weekly), weeklyOpus: enrichWindow(u.weeklyOpus) };
+  return { ...u, session: enrichWindow(u.session), weekly: enrichWindow(u.weekly), weeklyOpus: enrichWindow(u.weeklyOpus), fable: enrichWindow(u.fable) };
 }
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
@@ -53,7 +54,7 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
 }
 
 function maxUtil(u: EnrichedUsage): number {
-  return Math.max(u.session?.utilization ?? -1, u.weekly?.utilization ?? -1);
+  return Math.max(u.session?.utilization ?? -1, u.weekly?.utilization ?? -1, u.fable?.utilization ?? -1);
 }
 function byTightest(a: EnrichedUsage, b: EnrichedUsage): number {
   return maxUtil(b) - maxUtil(a);

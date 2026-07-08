@@ -13,7 +13,7 @@ const accounts: AccountConfig[] = [
 const config: SubtrackConfig = { ...DEFAULT_CONFIG, accounts };
 
 function ok(id: string): NormalizedUsage {
-  return { accountId: id, label: id, provider: 'claude', session: { utilization: 10, resetsAt: '2026-06-29T17:00:00.000Z' }, weekly: null, weeklyOpus: null, status: 'ok', lastUpdated: '', error: null, retryAt: null };
+  return { accountId: id, label: id, provider: 'claude', session: { utilization: 10, resetsAt: '2026-06-29T17:00:00.000Z' }, weekly: null, weeklyOpus: null, fable: { utilization: 88, resetsAt: '2026-06-29T17:00:00.000Z' }, fableAccess: true, status: 'ok', lastUpdated: '', error: null, retryAt: null };
 }
 function throttled(id: string): NormalizedUsage {
   return { ...ok(id), status: 'throttled' };
@@ -62,7 +62,7 @@ test('non-ok result carries forward last-known windows (never blanks)', async ()
   const p = new Poller({
     config: { ...config, accounts: [accounts[0]!] }, store, clock: () => clock,
     fetchUsage: async (a) => blank
-      ? { accountId: a.id, label: a.id, provider: 'claude', session: null, weekly: null, weeklyOpus: null, status: 'throttled', lastUpdated: '', error: '429', retryAt: null }
+      ? { accountId: a.id, label: a.id, provider: 'claude', session: null, weekly: null, weeklyOpus: null, fable: null, fableAccess: false, status: 'throttled', lastUpdated: '', error: '429', retryAt: null }
       : ok(a.id),
   });
   await p.tick(0);                              // ok: session util 10 stored
@@ -73,6 +73,8 @@ test('non-ok result carries forward last-known windows (never blanks)', async ()
   const u = store.get('c1')!;
   assert.equal(u.status, 'throttled');
   assert.equal(u.session?.utilization, 10);     // carried forward, NOT blanked
+  assert.equal(u.fable?.utilization, 88);       // fable bucket also carried forward
+  assert.equal(u.fableAccess, true);            // access fact stays visible through the error
 });
 
 test('auth_error pauses the account well past its normal TTL', async () => {

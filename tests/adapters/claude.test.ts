@@ -22,11 +22,80 @@ test('normalizeClaudeUsage maps five_hour/seven_day/opus', async () => {
   assert.equal(u.status, 'ok');
 });
 
+test('normalizeClaudeUsage extracts the Fable weekly-scoped bucket from limits[]', async () => {
+  const u = normalizeClaudeUsage(await fixture(), ACC, NOW);
+  assert.equal(u.fable?.utilization, 88);
+  assert.equal(u.fable?.resetsAt, '2026-07-02T09:00:00.000Z');
+  assert.equal(u.fableAccess, true);
+});
+
+test('normalizeClaudeUsage reports fableAccess=true even at 0% (access shown, not hidden)', () => {
+  const body = { limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 0, resets_at: null,
+      scope: { model: { display_name: 'Fable' } }, is_active: false },
+  ] };
+  const u = normalizeClaudeUsage(body, ACC, NOW);
+  assert.equal(u.fableAccess, true);
+  assert.equal(u.fable?.utilization, 0);
+});
+
+test('normalizeClaudeUsage reports fableAccess=false when the account has no Fable-scoped limit', () => {
+  const body = { five_hour: { utilization: 1, resets_at: null }, limits: [
+    { kind: 'weekly_all', group: 'weekly', percent: 10, resets_at: null, scope: null, is_active: true },
+  ] };
+  const u = normalizeClaudeUsage(body, ACC, NOW);
+  assert.equal(u.fableAccess, false);
+  assert.equal(u.fable, null);
+  // no limits array at all → also no access
+  assert.equal(normalizeClaudeUsage({}, ACC, NOW).fableAccess, false);
+});
+
+test('normalizeClaudeUsage matches Fable by scope.model.display_name regardless of order/kind', () => {
+  // Real shape: top-level seven_day_* are null; Fable lives only in limits[]. Match must not depend
+  // on the entry being first or on its `kind` string.
+  const body = {
+    five_hour: { utilization: 5, resets_at: '2026-07-08T00:00:00Z' },
+    seven_day: { utilization: 63, resets_at: '2026-07-08T20:00:00Z' },
+    seven_day_opus: null,
+    limits: [
+      { kind: 'weekly_scoped', group: 'weekly', percent: 97, resets_at: '2026-07-08T20:59:59Z',
+        scope: { model: { id: null, display_name: 'Fable' }, surface: null }, is_active: true },
+      { kind: 'weekly_all', group: 'weekly', percent: 63, resets_at: '2026-07-08T20:00:00Z', scope: null, is_active: false },
+    ],
+  };
+  const u = normalizeClaudeUsage(body, ACC, NOW);
+  assert.equal(u.weeklyOpus, null);
+  assert.equal(u.fable?.utilization, 97);
+  assert.equal(u.fable?.resetsAt, '2026-07-08T20:59:59.000Z');
+  assert.equal(u.fableAccess, true);
+});
+
+test('normalizeClaudeUsage leaves fable null when no Fable-scoped limit is present', () => {
+  const noFable = { five_hour: { utilization: 1, resets_at: null }, limits: [
+    { kind: 'weekly_all', group: 'weekly', percent: 10, resets_at: null, scope: null, is_active: true },
+  ] };
+  assert.equal(normalizeClaudeUsage(noFable, ACC, NOW).fable, null);
+  // no limits array at all
+  assert.equal(normalizeClaudeUsage({ five_hour: { utilization: 1, resets_at: null } }, ACC, NOW).fable, null);
+});
+
+test('normalizeClaudeUsage keeps fable resets_at null (freshly-reset scoped window)', () => {
+  const body = { limits: [
+    { kind: 'weekly_scoped', group: 'weekly', percent: 0, resets_at: null,
+      scope: { model: { display_name: 'Fable' } }, is_active: false },
+  ] };
+  const u = normalizeClaudeUsage(body, ACC, NOW);
+  assert.equal(u.fable?.utilization, 0);
+  assert.equal(u.fable?.resetsAt, null);
+});
+
 test('normalizeClaudeUsage tolerates missing windows', () => {
   const u = normalizeClaudeUsage({}, ACC, NOW);
   assert.equal(u.session, null);
   assert.equal(u.weekly, null);
   assert.equal(u.weeklyOpus, null);
+  assert.equal(u.fable, null);
+  assert.equal(u.fableAccess, false);
 });
 
 test('normalizeClaudeUsage keeps resets_at null (freshly-reset window) instead of faking epoch 0', () => {

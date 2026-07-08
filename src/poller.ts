@@ -57,7 +57,7 @@ export class Poller {
         try {
           usage = await this.deps.fetchUsage(acc);
         } catch (e) {
-          usage = { accountId: acc.id, label: acc.label, provider: acc.provider, session: null, weekly: null, weeklyOpus: null, status: 'error', lastUpdated: new Date(now).toISOString(), error: e instanceof Error ? e.message : String(e), retryAt: null };
+          usage = { accountId: acc.id, label: acc.label, provider: acc.provider, session: null, weekly: null, weeklyOpus: null, fable: null, fableAccess: false, status: 'error', lastUpdated: new Date(now).toISOString(), error: e instanceof Error ? e.message : String(e), retryAt: null };
         }
         // Never blank the dashboard: on any non-ok result, carry forward the last-known windows.
         if (usage.status !== 'ok') {
@@ -66,6 +66,8 @@ export class Poller {
             usage.session = prior.session;
             usage.weekly = prior.weekly;
             usage.weeklyOpus = prior.weeklyOpus;
+            usage.fable = prior.fable;
+            usage.fableAccess = prior.fableAccess; // keep the known access fact visible through errors
           }
         }
         this.applyBackoff(acc, usage, now);

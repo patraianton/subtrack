@@ -4,7 +4,7 @@ import { SnapshotStore } from '../src/snapshotStore.ts';
 import type { NormalizedUsage } from '../src/types.ts';
 
 function usage(id: string): NormalizedUsage {
-  return { accountId: id, label: id, provider: 'claude', session: null, weekly: null, weeklyOpus: null, status: 'ok', lastUpdated: '2026-06-29T12:00:00.000Z', error: null, retryAt: null };
+  return { accountId: id, label: id, provider: 'claude', session: null, weekly: null, weeklyOpus: null, fable: null, fableAccess: false, status: 'ok', lastUpdated: '2026-06-29T12:00:00.000Z', error: null, retryAt: null };
 }
 
 test('set/get/all', () => {

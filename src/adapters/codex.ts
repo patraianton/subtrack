@@ -44,14 +44,14 @@ export function normalizeCodexUsage(snapshot: unknown, account: AccountConfig, n
   if (!session && !weekly) {
     return {
       accountId: account.id, label: account.label, provider: 'codex',
-      session: null, weekly: null, weeklyOpus: null,
+      session: null, weekly: null, weeklyOpus: null, fable: null, fableAccess: false,
       status: 'error', lastUpdated: now.toISOString(),
       error: 'Unexpected wham/usage response (no rate-limit windows found)', retryAt: null,
     };
   }
   return {
     accountId: account.id, label: account.label, provider: 'codex',
-    session, weekly, weeklyOpus: null,
+    session, weekly, weeklyOpus: null, fable: null, fableAccess: false,
     status: 'ok', lastUpdated: now.toISOString(), error: null, retryAt: null,
   };
 }

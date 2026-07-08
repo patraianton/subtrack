@@ -24,15 +24,18 @@ test('formatCheckTable renders one row per account with percentages', () => {
     { accountId: 'c1', label: 'Claude 1', provider: 'claude',
       session: { utilization: 62, resetsAt: '2026-06-29T17:40:00.000Z' },
       weekly: { utilization: 41, resetsAt: '2026-07-02T09:00:00.000Z' },
-      weeklyOpus: null, status: 'ok', lastUpdated: '2026-06-29T12:00:00.000Z', error: null, retryAt: null },
+      weeklyOpus: null, fable: { utilization: 88, resetsAt: '2026-07-02T09:00:00.000Z' }, fableAccess: true,
+      status: 'ok', lastUpdated: '2026-06-29T12:00:00.000Z', error: null, retryAt: null },
     { accountId: 'x1', label: 'Codex 1', provider: 'codex',
-      session: null, weekly: null, weeklyOpus: null,
+      session: null, weekly: null, weeklyOpus: null, fable: null, fableAccess: false,
       status: 'auth_error', lastUpdated: '2026-06-29T12:00:00.000Z', error: 'expired', retryAt: null },
   ];
   const table = formatCheckTable(usages);
   assert.match(table, /Claude 1/);
   assert.match(table, /62%/);
   assert.match(table, /41%/);
+  assert.match(table, /88%/);   // fable column
+  assert.match(table, /FABLE/);
   assert.match(table, /auth_error/);
 });
 

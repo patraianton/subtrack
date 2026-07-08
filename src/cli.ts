@@ -49,9 +49,9 @@ function pct(w: { utilization: number } | null): string {
 export function formatCheckTable(usages: NormalizedUsage[]): string {
   const rows = usages.map((u) => {
     const status = u.status === 'ok' ? '' : `  [${u.status}${u.error ? `: ${u.error}` : ''}]`;
-    return `${u.label.padEnd(24)} ${u.provider.padEnd(7)} session ${pct(u.session).padStart(4)}  weekly ${pct(u.weekly).padStart(4)}${status}`;
+    return `${u.label.padEnd(24)} ${u.provider.padEnd(7)} session ${pct(u.session).padStart(4)}  weekly ${pct(u.weekly).padStart(4)}  fable ${pct(u.fable).padStart(4)}${status}`;
   });
-  return ['ACCOUNT                  PROVIDER SESSION       WEEKLY', ...rows].join('\n');
+  return ['ACCOUNT                  PROVIDER SESSION       WEEKLY        FABLE', ...rows].join('\n');
 }
 
 async function cmdCheck(base: string): Promise<number> {

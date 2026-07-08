@@ -14,8 +14,34 @@ function toWindow(raw: unknown): UsageWindow | null {
   return { utilization: w.utilization, resetsAt };
 }
 
+/**
+ * The Fable/Claude-5 weekly cap is not a top-level field — it arrives inside the `limits[]` array
+ * as a `weekly_scoped` entry scoped to model "Fable" (all the legacy `seven_day_*` fields are null
+ * now). Match by `scope.model.display_name` so we're robust to array order and to which `kind` slot
+ * the API uses. Entries carry `percent` (not `utilization`) + `resets_at`.
+ *
+ * `access` = the account exposes a Fable-scoped limit at all → it has Fable/Claude-5 access. Plans
+ * without Fable access don't get the entry (access=false, window=null). This is the per-account
+ * has/no-access fact the dashboard needs, distinct from a present-but-0% window.
+ */
+function fableUsage(body: Record<string, unknown>): { window: UsageWindow | null; access: boolean } {
+  const limits = body['limits'];
+  if (!Array.isArray(limits)) return { window: null, access: false };
+  for (const item of limits) {
+    if (!item || typeof item !== 'object') continue;
+    const l = item as { percent?: unknown; resets_at?: unknown; scope?: { model?: { display_name?: unknown } } };
+    if (l.scope?.model?.display_name !== 'Fable') continue;
+    // Entry present → the account has Fable access, even if percent is malformed/absent.
+    if (typeof l.percent !== 'number') return { window: null, access: true };
+    const resetsAt = typeof l.resets_at === 'string' ? new Date(l.resets_at).toISOString() : null;
+    return { window: { utilization: l.percent, resetsAt }, access: true };
+  }
+  return { window: null, access: false };
+}
+
 export function normalizeClaudeUsage(body: unknown, account: AccountConfig, now: Date = new Date()): NormalizedUsage {
   const b = (body ?? {}) as Record<string, unknown>;
+  const fable = fableUsage(b);
   return {
     accountId: account.id,
     label: account.label,
@@ -23,6 +49,8 @@ export function normalizeClaudeUsage(body: unknown, account: AccountConfig, now:
     session: toWindow(b['five_hour']),
     weekly: toWindow(b['seven_day']),
     weeklyOpus: toWindow(b['seven_day_opus']),
+    fable: fable.window,
+    fableAccess: fable.access,
     status: 'ok',
     lastUpdated: now.toISOString(),
     error: null,
