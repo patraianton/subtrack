@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { normalizeClaudeUsage, fetchClaudeUsage } from '../../src/adapters/claude.ts';
+import { StaleCredentialsError } from '../../src/auth/claude.ts';
 import type { AccountConfig } from '../../src/types.ts';
 
 const ACC: AccountConfig = { id: 'c1', label: 'Claude 1', provider: 'claude', enabled: true, credentialsHome: '/home/c1' };
@@ -159,4 +160,23 @@ test('fetchClaudeUsage maps a refresh/credential failure to auth_error (not gene
   const fetchImpl = (async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
   const u = await fetchClaudeUsage(ACC, { getAccessToken, fetchImpl }, NOW);
   assert.equal(u.status, 'auth_error');
+});
+
+test('fetchClaudeUsage maps StaleCredentialsError to status=stale without any network call', async () => {
+  let calls = 0;
+  const getAccessToken = async () => { throw new StaleCredentialsError('Claude credentials stale (expired 2026-07-08T00:00:00.000Z) — open a Claude Code session for this account to refresh them'); };
+  const fetchImpl = (async () => { calls += 1; return new Response('{}', { status: 200 }); }) as unknown as typeof fetch;
+  const u = await fetchClaudeUsage(ACC, { getAccessToken, fetchImpl }, NOW);
+  assert.equal(u.status, 'stale');
+  assert.match(u.error ?? '', /stale/i);
+  assert.equal(calls, 0);
+});
+
+test('fetchClaudeUsage points 401/403 at the credential source for read-only accounts (not add-account)', async () => {
+  const roAcc: AccountConfig = { ...ACC, credentialsMode: 'readonly' };
+  const fetchImpl = (async () => new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
+  const u = await fetchClaudeUsage(roAcc, { getAccessToken: async () => 'tok', fetchImpl }, NOW);
+  assert.equal(u.status, 'auth_error');
+  assert.match(u.error ?? '', /read-only|source/i);
+  assert.doesNotMatch(u.error ?? '', /add-account/);
 });

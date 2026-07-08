@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AccountConfig, NormalizedUsage } from './types.ts';
@@ -114,12 +114,33 @@ async function cmdRename(base: string, id: string, label: string): Promise<numbe
   return 0;
 }
 
-async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
-  const id = args.positionals[0];
-  const provider = args.flags.provider;
-  const labelFlag = typeof args.flags.label === 'string' ? args.flags.label : undefined;
-  if (!id || (provider !== 'claude' && provider !== 'codex')) {
-    console.error('Usage: subtrack add-account <id> --provider claude|codex [--label "..."]');
+/**
+ * Register an already-logged-in external Claude home (e.g. a Claude Code CLI config dir) as a
+ * read-only account: subtrack reads its access token each poll but NEVER refreshes or writes it —
+ * refresh tokens are single-use and belong to the CLI (incident 2026-07-08).
+ */
+async function registerReadonlyAccount(base: string, id: string, home: string, labelFlag?: string): Promise<number> {
+  const cfg = await loadConfig(base);
+  const oauth = await readClaudeOauth(home);
+  if (!oauth?.accessToken) {
+    console.error(`No Claude credentials found in ${home} (.credentials.json with claudeAiOauth.accessToken expected).`);
+    return 2;
+  }
+  const acc: AccountConfig = { id, label: id, provider: 'claude', enabled: true, credentialsHome: home, credentialsMode: 'readonly' };
+  acc.label = labelFlag ?? ((await accountEmail(acc)) || id);
+  await saveConfig(addAccount(cfg, acc), base);
+  console.log(`Added read-only Claude account ${id} (${acc.label}) — token is read from ${home} each poll; subtrack never refreshes it.`);
+  return 0;
+}
+
+/**
+ * Register a long-lived `claude setup-token` (sk-ant-oat01-…) account. The token is stored in an
+ * owned home WITHOUT a refresh token or expiry, and the account is marked readonly, so the
+ * no-refresh guarantee is the same by construction: there is nothing to rotate.
+ */
+export async function registerStaticTokenAccount(base: string, id: string, token: string, labelFlag?: string): Promise<number> {
+  if (!token) {
+    console.error('No token provided. Pipe it on stdin:  claude setup-token | subtrack add-account <id> --provider claude --static-token');
     return 2;
   }
   const cfg = await loadConfig(base);
@@ -127,6 +148,43 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
     console.error(`Account "${id}" already exists — run \`remove-account ${id}\` first to redo it.`);
     return 2;
   }
+  const home = claudeHomeDir(configDir(base), id);
+  await mkdir(home, { recursive: true });
+  await writeFile(join(home, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: token } }, null, 2), 'utf8');
+  const acc: AccountConfig = { id, label: labelFlag ?? id, provider: 'claude', enabled: true, credentialsHome: home, credentialsMode: 'readonly' };
+  await saveConfig(addAccount(cfg, acc), base);
+  console.log(`Added static-token Claude account ${id} (${acc.label}) — long-lived setup-token, no refresh ever.`);
+  return 0;
+}
+
+/** Read all of stdin (for piping a setup-token in without putting it in argv/shell history). */
+async function readStdinText(): Promise<string> {
+  let out = '';
+  for await (const chunk of process.stdin) out += chunk;
+  return out.trim();
+}
+
+async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
+  const id = args.positionals[0];
+  const provider = args.flags.provider;
+  const labelFlag = typeof args.flags.label === 'string' ? args.flags.label : undefined;
+  if (!id || (provider !== 'claude' && provider !== 'codex')) {
+    console.error('Usage: subtrack add-account <id> --provider claude|codex [--label "..."] [--readonly-home <dir>] [--static-token]');
+    return 2;
+  }
+  const readonlyHome = typeof args.flags['readonly-home'] === 'string' ? args.flags['readonly-home'] : undefined;
+  const staticToken = args.flags['static-token'] === true;
+  if ((readonlyHome || staticToken) && provider !== 'claude') {
+    console.error('--readonly-home / --static-token are Claude-only.');
+    return 2;
+  }
+  const cfg = await loadConfig(base);
+  if (cfg.accounts.some((a) => a.id === id)) {
+    console.error(`Account "${id}" already exists — run \`remove-account ${id}\` first to redo it.`);
+    return 2;
+  }
+  if (readonlyHome) return registerReadonlyAccount(base, id, readonlyHome, labelFlag);
+  if (staticToken) return registerStaticTokenAccount(base, id, await readStdinText(), labelFlag);
   if (provider === 'claude') {
     // Isolated CLAUDE_CONFIG_DIR per account: log Claude Code in HERE so subtrack owns this account's
     // token (separate from the user's main ~/.claude) and can auto-refresh it forever without conflict.

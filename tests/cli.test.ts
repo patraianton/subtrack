@@ -3,8 +3,24 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs, formatCheckTable, main } from '../src/cli.ts';
-import type { NormalizedUsage } from '../src/types.ts';
+import { readFile } from 'node:fs/promises';
+import { parseArgs, formatCheckTable, main, registerStaticTokenAccount } from '../src/cli.ts';
+import type { NormalizedUsage, SubtrackConfig } from '../src/types.ts';
+
+async function withTmp(prefix: string, fn: (dir: string) => Promise<void>) {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  try { await fn(dir); } finally { await rm(dir, { recursive: true, force: true }); }
+}
+
+async function readCfg(base: string): Promise<SubtrackConfig> {
+  return JSON.parse(await readFile(join(base, '.subtrack', 'accounts.json'), 'utf8')) as SubtrackConfig;
+}
+
+function silenced<T>(fn: () => Promise<T>): Promise<T> {
+  const log = console.log, err = console.error;
+  console.log = () => {}; console.error = () => {};
+  return fn().finally(() => { console.log = log; console.error = err; });
+}
 
 test('parseArgs splits command, positionals, and flags', () => {
   const r = parseArgs(['add-account', 'claude-1', '--provider', 'claude', '--label', 'Work A', '--enabled']);
@@ -37,6 +53,46 @@ test('formatCheckTable renders one row per account with percentages', () => {
   assert.match(table, /88%/);   // fable column
   assert.match(table, /FABLE/);
   assert.match(table, /auth_error/);
+});
+
+test('add-account --readonly-home registers an external CLI home without login, mode readonly', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    await withTmp('ext-cli-home-', async (extHome) => {
+      await writeFile(join(extHome, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'cli-tok', refreshToken: 'cli-r', expiresAt: 9 } }), 'utf8');
+      await writeFile(join(extHome, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'cc4@example.com' } }), 'utf8');
+      const before = await readFile(join(extHome, '.credentials.json'), 'utf8');
+      const code = await silenced(() => main(['add-account', 'cc4', '--provider', 'claude', '--readonly-home', extHome], base));
+      assert.equal(code, 0);
+      const acc = (await readCfg(base)).accounts.find((a) => a.id === 'cc4');
+      assert.equal(acc?.credentialsMode, 'readonly');
+      assert.equal(acc?.credentialsHome, extHome);
+      assert.equal(acc?.label, 'cc4@example.com'); // label defaults to the home's account email
+      assert.equal(await readFile(join(extHome, '.credentials.json'), 'utf8'), before); // never written
+    });
+  });
+});
+
+test('add-account --readonly-home fails cleanly when the home has no credentials', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    await withTmp('ext-cli-home-', async (extHome) => {
+      const code = await silenced(() => main(['add-account', 'cc4', '--provider', 'claude', '--readonly-home', extHome], base));
+      assert.equal(code, 2);
+    });
+  });
+});
+
+test('registerStaticTokenAccount stores a refresh-less setup-token and registers the account readonly', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const code = await silenced(() => registerStaticTokenAccount(base, 'cc9', 'sk-ant-oat01-STATIC', 'static acct'));
+    assert.equal(code, 0);
+    const acc = (await readCfg(base)).accounts.find((a) => a.id === 'cc9');
+    assert.equal(acc?.credentialsMode, 'readonly');
+    assert.equal(acc?.label, 'static acct');
+    const file = JSON.parse(await readFile(join(acc!.credentialsHome!, '.credentials.json'), 'utf8')) as { claudeAiOauth: Record<string, unknown> };
+    assert.equal(file.claudeAiOauth.accessToken, 'sk-ant-oat01-STATIC');
+    assert.equal('refreshToken' in file.claudeAiOauth, false); // nothing to rotate, ever
+    assert.equal('expiresAt' in file.claudeAiOauth, false);    // long-lived: no fake expiry
+  });
 });
 
 test('main resolves to exit 1 (never an unhandled rejection) when accounts.json is corrupt', async () => {
