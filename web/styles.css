@@ -30,4 +30,6 @@ h1 { font-size: 18px; margin: 0; }
 .bar { height: 8px; border-radius: 4px; background: #21262d; overflow: hidden; margin-top: 3px; }
 .fill { height: 100%; }
 .fill.ok { background: var(--ok); } .fill.warn { background: var(--warn); } .fill.crit { background: var(--crit); }
+.gauge.noaccess { opacity: 0.4; } /* Fable entitlement absent — show the fact, muted, no fill */
+.gauge.noaccess .gauge-top span:last-child { font-style: italic; }
 .err { color: var(--crit); font-size: 12px; margin-top: 6px; }

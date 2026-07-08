@@ -21,8 +21,18 @@ function isStale(u, now) {
   return now - Date.parse(u.lastUpdated) > ttl * 2;
 }
 
+// Fable is a Claude-only entitlement. Show the per-account fact on every Claude tile: a gauge when
+// the account has access (even at 0%), or an explicit "no access" marker when it doesn't. Codex
+// tiles omit the row entirely (Fable is not applicable there).
+function fableRow(u, now) {
+  if (u.provider !== 'claude') return '';
+  if (u.fable || u.fableAccess) return gauge('weekly · fable', u.fable, now);
+  return `<div class="gauge noaccess"><div class="gauge-top"><span>weekly · fable</span><span>no access</span></div><div class="bar"></div></div>`;
+}
+
 function card(u, now) {
   const opus = u.weeklyOpus ? gauge('weekly · opus', u.weeklyOpus, now) : '';
+  const fable = fableRow(u, now);
   const notes = [];
   if (u.status === 'throttled' && u.retryAt) notes.push(`⏳ retry in ${formatCountdown(u.retryAt, now)}`);
   if (u.status !== 'ok' && u.error) notes.push(u.error);
@@ -31,7 +41,7 @@ function card(u, now) {
   const stale = isStale(u, now) ? ' stale' : '';
   return `<section class="card ${u.provider} ${u.status}${stale}">`
     + `<div class="card-head"><span class="badge ${u.provider}">${u.provider}</span><span class="label">${esc(u.label)}</span>${ts}<span class="dot ${u.status}"></span></div>`
-    + gauge('session', u.session, now) + gauge('weekly', u.weekly, now) + opus + note + `</section>`;
+    + gauge('session', u.session, now) + gauge('weekly', u.weekly, now) + opus + fable + note + `</section>`;
 }
 
 // Group cards by provider (Claude first, then Codex), keeping the server's tightest-first order within
@@ -50,7 +60,7 @@ function renderGrouped(accounts, now) {
 function tightest(accounts) {
   let worst = null;
   for (const u of accounts) {
-    for (const [kind, w] of [['session', u.session], ['weekly', u.weekly], ['weekly · opus', u.weeklyOpus]]) {
+    for (const [kind, w] of [['session', u.session], ['weekly', u.weekly], ['weekly · opus', u.weeklyOpus], ['weekly · fable', u.fable]]) {
       if (w && (!worst || w.utilization > worst.util)) worst = { label: u.label, kind, util: Math.round(w.utilization) };
     }
   }

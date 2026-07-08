@@ -8,6 +8,8 @@ export function baseUsage(account: AccountConfig, provider: Provider, now: Date)
     session: null,
     weekly: null,
     weeklyOpus: null,
+    fable: null,
+    fableAccess: false,
     status: 'error',
     lastUpdated: now.toISOString(),
     error: null,

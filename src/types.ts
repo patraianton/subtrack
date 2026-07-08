@@ -15,6 +15,10 @@ export interface NormalizedUsage {
   session: UsageWindow | null;    // 5-hour window
   weekly: UsageWindow | null;     // 7-day window
   weeklyOpus: UsageWindow | null; // Claude-only separate Opus weekly cap
+  fable: UsageWindow | null;      // Claude-only separate Fable/Claude-5 weekly cap (limits[] weekly_scoped)
+  fableAccess: boolean;           // whether the account has Fable/Claude-5 access at all (a Fable-scoped
+                                  // weekly limit is present). false for Codex and for Claude plans without it.
+                                  // Distinct from fable===null: lets the tile show "no access" vs a 0% window.
   status: UsageStatus;
   lastUpdated: string;            // ISO-8601 UTC
   error: string | null;
