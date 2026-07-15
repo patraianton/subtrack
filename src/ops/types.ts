@@ -53,3 +53,18 @@ export interface ServicesResponse {
   untracked: UntrackedRunner[];
   generatedAt: string;         // ISO
 }
+
+export interface ActionRequest {
+  action: 'restart' | 'stop' | 'register';
+  id?: string;    // for restart/stop: the ServiceDef.id
+  pid?: number;   // for register: the untracked runner's pid
+  label?: string; // for register: desired task name (sanitized server-side)
+}
+
+export interface ActionResult {
+  ok: boolean;
+  ran: string;          // short human description of what was attempted
+  output?: string;      // trimmed stdout/stderr tail, for display
+  error?: string;       // set when ok is false
+  taskName?: string;    // for register: the created task's name
+}
