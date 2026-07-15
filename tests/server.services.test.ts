@@ -23,6 +23,13 @@ test('GET /api/services returns the provider payload', async () => {
   });
 });
 
+test('GET /api/services returns 500 when the provider throws', async () => {
+  await withServer(async () => { throw new Error('boom'); }, async (base) => {
+    const res = await fetch(`${base}/api/services`);
+    assert.equal(res.status, 500);
+  });
+});
+
 test('GET /api/services is 503 when no provider is wired', async () => {
   const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 } });
   app.listen(0, '127.0.0.1');

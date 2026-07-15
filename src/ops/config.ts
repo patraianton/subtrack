@@ -9,14 +9,17 @@ export function servicesPath(base: string = homedir()): string {
 }
 
 export async function loadServices(base: string = homedir()): Promise<ServiceDef[]> {
+  let raw: string;
   try {
-    const raw = await readFile(servicesPath(base), 'utf8');
-    const parsed = JSON.parse(raw) as { services?: ServiceDef[] };
-    return Array.isArray(parsed.services) ? parsed.services : [];
+    raw = await readFile(servicesPath(base), 'utf8');
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw e;
   }
+  const parsed = JSON.parse(raw) as { services?: unknown };
+  if (parsed.services === undefined) return [];
+  if (!Array.isArray(parsed.services)) throw new Error('services.json is malformed: "services" must be an array');
+  return parsed.services as ServiceDef[];
 }
 
 export async function saveServices(defs: ServiceDef[], base: string = homedir()): Promise<void> {

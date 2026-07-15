@@ -30,3 +30,13 @@ test('saveServices then loadServices round-trips', async () => {
     assert.equal(back[0]!.port, 7777);
   });
 });
+
+test('loadServices throws on a present-but-non-array services field', async () => {
+  await withTempBase(async (base) => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const { configDir } = await import('../../src/config.ts');
+    await mkdir(configDir(base), { recursive: true });
+    await writeFile(servicesPath(base), JSON.stringify({ services: { not: 'an array' } }), 'utf8');
+    await assert.rejects(() => loadServices(base), /malformed/);
+  });
+});

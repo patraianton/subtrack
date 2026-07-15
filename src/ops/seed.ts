@@ -1,5 +1,6 @@
+import { existsSync } from 'node:fs';
 import type { ServiceDef, SystemState } from './types.ts';
-import { loadServices, saveServices } from './config.ts';
+import { loadServices, saveServices, servicesPath } from './config.ts';
 
 const PERIODIC = /(_healthcheck|_summary|-summary|healthcheck|refresh)/i;
 
@@ -16,8 +17,7 @@ export function seedServices(sys: SystemState): ServiceDef[] {
 }
 
 export async function ensureServices(base: string, sys: SystemState): Promise<ServiceDef[]> {
-  const existing = await loadServices(base);
-  if (existing.length > 0) return existing;
+  if (existsSync(servicesPath(base))) return loadServices(base);
   const seeded = seedServices(sys);
   await saveServices(seeded, base);
   return seeded;
