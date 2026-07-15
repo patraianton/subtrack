@@ -10,6 +10,9 @@ import { SnapshotStore } from './snapshotStore.ts';
 import { Poller } from './poller.ts';
 import { loadConfig } from './config.ts';
 import { makeFetchUsage } from './adapters/index.ts';
+import type { ServicesResponse } from './ops/types.ts';
+import { makeGetServices } from './ops/services.ts';
+import { runPwsh } from './ops/windows.ts';
 
 export interface ApiWindow extends UsageWindow { severity: Severity }
 export interface EnrichedUsage extends Omit<NormalizedUsage, 'session' | 'weekly' | 'weeklyOpus' | 'fable'> {
@@ -29,11 +32,15 @@ export function enrichUsage(u: NormalizedUsage): EnrichedUsage {
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
-export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: { claude: number; codex: number } }): Server {
+export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: { claude: number; codex: number }; getServices?: () => Promise<ServicesResponse> }): Server {
   return createServer(async (req, res) => {
     const url = (req.url ?? '/').split('?')[0]!;
     try {
       if (url === '/api/health') return json(res, { ok: true });
+      if (url === '/api/services') {
+        if (!opts.getServices) { res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'services unavailable' })); return; }
+        return json(res, await opts.getServices());
+      }
       if (url === '/api/usage') {
         const accounts = store.all().map(enrichUsage).sort(byTightest);
         return json(res, { accounts, uiRefreshSeconds: opts.uiRefreshSeconds, pollIntervalSeconds: opts.pollIntervalSeconds });
@@ -76,7 +83,8 @@ export async function serve(base: string = homedir(), opts: { open?: boolean } =
   const poller = new Poller({ config: cfg, fetchUsage, store });
   poller.start();
   const webDir = fileURLToPath(new URL('../web/', import.meta.url)); // decode %20 etc — never use .pathname on Windows
-  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds });
+  const getServices = makeGetServices({ base, run: runPwsh });
+  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices });
   // Reject (rather than hang) if the port is taken — the daemon supervisor reacts to the non-zero exit.
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => reject(err);
