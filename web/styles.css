@@ -51,3 +51,8 @@ h1 { font-size: 18px; margin: 0; }
 .svc-kind { font-size: 0.75rem; opacity: 0.6; }
 .svc-detail, .svc-meta { font-size: 0.8rem; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { opacity: 0.6; padding: 16px; }
+.svc { grid-template-columns: 14px 1.4fr 60px 2fr 1fr auto; }
+.svc-acts { display: flex; gap: 6px; }
+.svc-act { font-size: 0.72rem; padding: 2px 8px; border-radius: 5px; border: 1px solid rgba(127,127,127,0.4); background: transparent; color: inherit; cursor: pointer; }
+.svc-act:hover { background: rgba(127,127,127,0.15); }
+.svc-act:disabled { opacity: 0.5; cursor: default; }
