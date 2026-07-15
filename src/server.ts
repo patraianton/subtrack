@@ -10,8 +10,9 @@ import { SnapshotStore } from './snapshotStore.ts';
 import { Poller } from './poller.ts';
 import { loadConfig } from './config.ts';
 import { makeFetchUsage } from './adapters/index.ts';
-import type { ServicesResponse } from './ops/types.ts';
+import type { ServicesResponse, ActionRequest, ActionResult } from './ops/types.ts';
 import { makeGetServices } from './ops/services.ts';
+import { makeRunServiceAction } from './ops/actions.ts';
 import { runPwsh } from './ops/windows.ts';
 
 export interface ApiWindow extends UsageWindow { severity: Severity }
@@ -32,10 +33,18 @@ export function enrichUsage(u: NormalizedUsage): EnrichedUsage {
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
-export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: { claude: number; codex: number }; getServices?: () => Promise<ServicesResponse> }): Server {
+export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: { claude: number; codex: number }; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult> }): Server {
   return createServer(async (req, res) => {
     const url = (req.url ?? '/').split('?')[0]!;
     try {
+      if (req.method === 'POST' && url === '/api/services/action') {
+        if (!opts.runServiceAction) { res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'actions unavailable' })); return; }
+        let parsed: ActionRequest;
+        try { parsed = JSON.parse((await readBody(req)) || '{}') as ActionRequest; }
+        catch { res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'bad json' })); return; }
+        try { return json(res, await opts.runServiceAction(parsed)); }
+        catch (e) { res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'action failed', detail: String((e as Error).message) })); return; }
+      }
       if (url === '/api/health') return json(res, { ok: true });
       if (url === '/api/services') {
         if (!opts.getServices) { res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'services unavailable' })); return; }
@@ -76,6 +85,15 @@ function json(res: ServerResponse, body: unknown): void {
   res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
 }
 
+function readBody(req: import('node:http').IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (c) => { data += c; if (data.length > 1_000_000) { req.destroy(); reject(new Error('body too large')); } });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
 /** Whether to auto-open a browser: explicit opts win, else honour SUBTRACK_NO_OPEN (set by the daemon). */
 export function shouldOpenBrowser(opts: { open?: boolean }, env: NodeJS.ProcessEnv = process.env): boolean {
   return opts.open ?? env.SUBTRACK_NO_OPEN !== '1';
@@ -89,7 +107,8 @@ export async function serve(base: string = homedir(), opts: { open?: boolean } =
   poller.start();
   const webDir = fileURLToPath(new URL('../web/', import.meta.url)); // decode %20 etc — never use .pathname on Windows
   const getServices = makeGetServices({ base, run: runPwsh });
-  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices });
+  const runServiceAction = makeRunServiceAction({ base, run: runPwsh });
+  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction });
   // Reject (rather than hang) if the port is taken — the daemon supervisor reacts to the non-zero exit.
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => reject(err);
