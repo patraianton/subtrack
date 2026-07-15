@@ -31,3 +31,25 @@ test('renderServices escapes service labels', () => {
   assert.doesNotMatch(html, /<img src=x>/);
   assert.match(html, /&lt;img/);
 });
+
+test('renderServices adds restart/stop buttons for services with a taskName', () => {
+  const data = {
+    services: [
+      { id: 'radar', label: 'Radar', group: 'radar', kind: 'task', taskName: 'Radar-Spike8', status: 'down', detail: '...', alwaysOn: true, pid: null, lastRun: null, nextRun: null },
+      { id: 'web', label: 'Web', group: 'web', kind: 'http', status: 'up', detail: '...', alwaysOn: true, pid: null, lastRun: null, nextRun: null },
+    ],
+    untracked: [],
+    generatedAt: '2026-07-15T09:00:00.000Z',
+  };
+  const html = renderServices(data, 0);
+  assert.match(html, /data-action="restart"[^>]*data-id="radar"/);
+  assert.match(html, /data-action="stop"[^>]*data-id="radar"/);
+  // a service with no taskName gets no restart button
+  assert.doesNotMatch(html, /data-action="restart"[^>]*data-id="web"/);
+});
+
+test('renderServices adds a register button for untracked runners', () => {
+  const data = { services: [], untracked: [{ kind: 'port', port: 9999, pid: 5, name: 'node', cmd: 'node ghost.js' }], generatedAt: '2026-07-15T09:00:00.000Z' };
+  const html = renderServices(data, 0);
+  assert.match(html, /data-action="register"[^>]*data-pid="5"/);
+});
