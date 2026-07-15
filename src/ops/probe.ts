@@ -1,10 +1,22 @@
 import type { ServiceDef, ServiceHealth, ServiceStatus, SystemState, TaskState, ProcInfo } from './types.ts';
 
-function matchProc(match: string | undefined, processes: ProcInfo[]): ProcInfo | undefined {
-  if (!match) return undefined;
+type MatchResult =
+  | { ok: 'no-pattern' }
+  | { ok: 'invalid' }
+  | { ok: 'found'; proc: ProcInfo }
+  | { ok: 'absent' };
+
+function matchProc(match: string | undefined, processes: ProcInfo[]): MatchResult {
+  if (!match) return { ok: 'no-pattern' };
   let re: RegExp;
-  try { re = new RegExp(match, 'i'); } catch { return undefined; }
-  return processes.find((p) => re.test(p.name) || re.test(p.cmd));
+  try { re = new RegExp(match, 'i'); } catch { return { ok: 'invalid' }; }
+  const proc = processes.find((p) => re.test(p.name) || re.test(p.cmd));
+  return proc ? { ok: 'found', proc } : { ok: 'absent' };
+}
+
+// SCHED_S_* success/informational codes (0x41300–0x4130B: ready, running, not-yet-run, ...) are NOT failures.
+function isBenignTaskResult(r: number | null): boolean {
+  return r === null || r === 0 || (r >= 0x41300 && r <= 0x4130b);
 }
 
 function health(def: ServiceDef, status: ServiceStatus, detail: string, extra: Partial<ServiceHealth> = {}): ServiceHealth {
@@ -16,8 +28,8 @@ function probeTask(def: ServiceDef, sys: SystemState): ServiceHealth {
   if (!t) return health(def, 'down', `task "${def.taskName}" not registered`);
   const base = { lastRun: t.lastRun, nextRun: t.nextRun };
   if (t.state === 'Disabled') return health(def, 'down', 'task disabled', base);
-  if (t.lastResult !== null && t.lastResult !== 0) {
-    return health(def, 'degraded', `last run failed (0x${t.lastResult.toString(16).toUpperCase()})`, base);
+  if (!isBenignTaskResult(t.lastResult)) {
+    return health(def, 'degraded', `last run failed (0x${(t.lastResult as number).toString(16).toUpperCase()})`, base);
   }
   if (def.alwaysOn && def.port !== undefined) {
     return sys.ports.includes(def.port)
@@ -25,10 +37,10 @@ function probeTask(def: ServiceDef, sys: SystemState): ServiceHealth {
       : health(def, 'degraded', `task ${t.state} but nothing on :${def.port}`, base);
   }
   if (def.alwaysOn && def.match) {
-    const p = matchProc(def.match, sys.processes);
-    return p
-      ? health(def, 'up', `task ${t.state}, process ${p.pid}`, { ...base, pid: p.pid })
-      : health(def, 'degraded', `task ${t.state} but no matching process`, base);
+    const m = matchProc(def.match, sys.processes);
+    if (m.ok === 'invalid') return health(def, 'unknown', `invalid match regex: ${def.match}`, base);
+    if (m.ok === 'found') return health(def, 'up', `task ${t.state}, process ${m.proc.pid}`, { ...base, pid: m.proc.pid });
+    return health(def, 'degraded', `task ${t.state} but no matching process`, base);
   }
   return health(def, 'up', `task ${t.state}`, base);
 }
@@ -48,11 +60,15 @@ export function probeService(def: ServiceDef, sys: SystemState, httpOk?: boolean
         : health(def, 'down', `no http on :${def.port}`);
     }
     case 'process': {
-      const p = matchProc(def.match, sys.processes);
-      return p ? health(def, 'up', `process ${p.pid} (${p.name})`, { pid: p.pid }) : health(def, 'down', 'no matching process');
+      const m = matchProc(def.match, sys.processes);
+      if (m.ok === 'no-pattern') return health(def, 'unknown', 'no match pattern configured');
+      if (m.ok === 'invalid') return health(def, 'unknown', `invalid match regex: ${def.match}`);
+      if (m.ok === 'found') return health(def, 'up', `process ${m.proc.pid} (${m.proc.name})`, { pid: m.proc.pid });
+      return health(def, 'down', 'no matching process');
     }
     case 'task':
       return probeTask(def, sys);
+    // Reachable: services.json is cast to ServiceDef without runtime validation, so an unrecognized kind can arrive here.
     default:
       return health(def, 'unknown', `unknown kind "${(def as ServiceDef).kind}"`);
   }

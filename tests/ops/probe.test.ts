@@ -91,3 +91,25 @@ test('running task is up', () => {
   const sys: SystemState = { ...emptySys, tasks: [{ name: 't', state: 'Running', lastResult: 0, lastRun: '2026-07-15', nextRun: null }] };
   assert.equal(probeService(def({ kind: 'task', taskName: 't' }), sys).status, 'up');
 });
+
+test('process kind: unknown (not down) when no match pattern is configured', () => {
+  const h = probeService(def({ kind: 'process', match: undefined }), emptySys);
+  assert.equal(h.status, 'unknown');
+});
+
+test('process kind: unknown when the match regex is invalid', () => {
+  const h = probeService(def({ kind: 'process', match: '(' }), emptySys);
+  assert.equal(h.status, 'unknown');
+});
+
+test('task kind: benign SCHED_S_* result codes (running / not-yet-run) are not failures', () => {
+  for (const r of [267009 /* 0x41301 running */, 267011 /* 0x41303 not yet run */]) {
+    const sys = { ...emptySys, tasks: [{ name: 't', state: 'Ready', lastResult: r, lastRun: null, nextRun: null }] };
+    assert.equal(probeService(def({ kind: 'task', taskName: 't' }), sys).status, 'up', `code ${r}`);
+  }
+});
+
+test('task kind: a genuine nonzero failure code is degraded', () => {
+  const sys = { ...emptySys, tasks: [{ name: 't', state: 'Ready', lastResult: 1, lastRun: null, nextRun: null }] };
+  assert.equal(probeService(def({ kind: 'task', taskName: 't' }), sys).status, 'degraded');
+});
