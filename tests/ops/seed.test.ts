@@ -52,3 +52,12 @@ test('ensureServices leaves an existing manifest untouched', async () => {
     assert.deepEqual(defs.map((d) => d.id), ['only']);
   });
 });
+
+test('ensureServices does not reseed when the file exists but is empty', async () => {
+  await withTempBase(async (base) => {
+    await saveServices([], base);                       // deliberately empty, file exists
+    const defs = await ensureServices(base, sys);
+    assert.deepEqual(defs, []);                          // respected, NOT repopulated from sys
+    assert.deepEqual(await loadServices(base), []);      // still empty on disk
+  });
+});

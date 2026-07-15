@@ -39,7 +39,12 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
       if (url === '/api/health') return json(res, { ok: true });
       if (url === '/api/services') {
         if (!opts.getServices) { res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'services unavailable' })); return; }
-        return json(res, await opts.getServices());
+        try {
+          return json(res, await opts.getServices());
+        } catch (e) {
+          res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'services failed', detail: String((e as Error).message) }));
+          return;
+        }
       }
       if (url === '/api/usage') {
         const accounts = store.all().map(enrichUsage).sort(byTightest);
