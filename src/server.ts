@@ -38,12 +38,21 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
     const url = (req.url ?? '/').split('?')[0]!;
     try {
       if (req.method === 'POST' && url === '/api/services/action') {
-        if (!opts.runServiceAction) { res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'actions unavailable' })); return; }
+        if (!opts.runServiceAction) { safeWrite(res, 503, { error: 'actions unavailable' }); return; }
+        // CSRF defense: this endpoint changes system state. A cross-origin browser POST carries an
+        // Origin that won't match our loopback origin; reject it. Non-browser clients send no Origin.
+        const origin = req.headers.origin;
+        const host = req.headers.host ?? '';
+        const originOk = !origin || origin === `http://${host}` || /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin);
+        if (!originOk) { safeWrite(res, 403, { error: 'forbidden (cross-origin)' }); return; }
+        let bodyText: string;
+        try { bodyText = await readBody(req); }
+        catch (e) { safeWrite(res, (e as { tooLarge?: boolean }).tooLarge ? 413 : 400, { error: (e as { tooLarge?: boolean }).tooLarge ? 'payload too large' : 'bad request' }); return; }
         let parsed: ActionRequest;
-        try { parsed = JSON.parse((await readBody(req)) || '{}') as ActionRequest; }
-        catch { res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'bad json' })); return; }
+        try { parsed = JSON.parse(bodyText || '{}') as ActionRequest; }
+        catch { safeWrite(res, 400, { error: 'bad json' }); return; }
         try { return json(res, await opts.runServiceAction(parsed)); }
-        catch (e) { res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'action failed', detail: String((e as Error).message) })); return; }
+        catch (e) { safeWrite(res, 500, { error: 'action failed', detail: String((e as Error).message) }); return; }
       }
       if (url === '/api/health') return json(res, { ok: true });
       if (url === '/api/services') {
@@ -85,12 +94,21 @@ function json(res: ServerResponse, body: unknown): void {
   res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
 }
 
+function safeWrite(res: ServerResponse, status: number, body: unknown): void {
+  if (res.writableEnded || res.headersSent) return;
+  try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body)); } catch { /* socket gone */ }
+}
+
 function readBody(req: import('node:http').IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', (c) => { data += c; if (data.length > 1_000_000) { req.destroy(); reject(new Error('body too large')); } });
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
+    let data = ''; let done = false;
+    req.on('data', (c) => {
+      if (done) return;
+      data += c;
+      if (data.length > 1_000_000) { done = true; const e = new Error('payload too large') as Error & { tooLarge?: boolean }; e.tooLarge = true; reject(e); }
+    });
+    req.on('end', () => { if (!done) resolve(data); });
+    req.on('error', (err) => { if (!done) { done = true; reject(err); } });
   });
 }
 

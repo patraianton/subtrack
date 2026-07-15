@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { request as httpRequest } from 'node:http';
 import { createApp } from '../src/server.ts';
 import { SnapshotStore } from '../src/snapshotStore.ts';
 import type { ServicesResponse, ActionRequest, ActionResult } from '../src/ops/types.ts';
@@ -75,4 +76,36 @@ test('POST /api/services/action is 503 when no executor is wired', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/services/action`, { method: 'POST', body: '{}' });
     assert.equal(res.status, 503);
   } finally { app.close(); }
+});
+
+test('POST /api/services/action rejects a cross-origin request with 403', async () => {
+  // Use node:http (not fetch) so we can set an arbitrary Origin header reliably.
+  await withActionServer(async () => ({ ok: true, ran: 'x' }), async (base) => {
+    const port = Number(new URL(base).port);
+    const status = await new Promise<number>((resolve, reject) => {
+      const r = httpRequest({ host: '127.0.0.1', port, path: '/api/services/action', method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' } }, (res) => { res.resume(); resolve(res.statusCode!); });
+      r.on('error', reject);
+      r.end(JSON.stringify({ action: 'restart', id: 'radar' }));
+    });
+    assert.equal(status, 403);
+  });
+});
+
+test('POST /api/services/action allows a matching loopback Origin', async () => {
+  await withActionServer(async () => ({ ok: true, ran: 'x' }), async (base) => {
+    const port = Number(new URL(base).port);
+    const status = await new Promise<number>((resolve, reject) => {
+      const r = httpRequest({ host: '127.0.0.1', port, path: '/api/services/action', method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${port}` } }, (res) => { res.resume(); resolve(res.statusCode!); });
+      r.on('error', reject);
+      r.end(JSON.stringify({ action: 'restart', id: 'radar' }));
+    });
+    assert.equal(status, 200);
+  });
+});
+
+test('POST /api/services/action returns 413 on an oversized body', async () => {
+  await withActionServer(async () => ({ ok: true, ran: 'x' }), async (base) => {
+    const res = await fetch(`${base}/api/services/action`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: 'x'.repeat(1_100_000) });
+    assert.equal(res.status, 413);
+  });
 });
