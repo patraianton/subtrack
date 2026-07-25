@@ -35,9 +35,9 @@ export interface AccountConfig {
   credentialsHome?: string; // isolated config dir: claude → CLAUDE_CONFIG_DIR, codex → CODEX_HOME
   // 'owned' (default when absent — pre-existing configs migrate as-is): subtrack created the home
   //   via add-account and is the SOLE owner of its refresh token → may auto-refresh + persist.
-  // 'readonly': the home belongs to someone else (a live Claude Code CLI dir) or holds a static
-  //   setup-token. Refresh tokens are single-use, so refreshing here would orphan the real owner
-  //   (incident 2026-07-08) — subtrack only ever reads the access token, never refreshes/writes.
+  // 'readonly': the home belongs to someone else (a live Claude Code CLI/Hermes dir) or holds a
+  //   static setup-token. Refresh tokens are single-use, so refreshing here would orphan the real
+  //   owner (incident 2026-07-08) — subtrack only ever reads the access token, never refreshes/writes.
   credentialsMode?: 'owned' | 'readonly';
 }
 

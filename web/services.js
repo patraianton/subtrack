@@ -5,8 +5,17 @@ function actionBtn(action, attrs, text) {
 }
 
 function row(s) {
+  const hermesMeta = [
+    s.pid ? `pid ${s.pid}` : '',
+    s.subscription || '',
+    s.checkedAt ? `checked ${new Date(s.checkedAt).toLocaleTimeString()}` : '',
+    s.autoHeal ? 'auto-heal on' : '',
+    s.consecutiveFailures ? `${s.consecutiveFailures} failed checks` : '',
+  ].filter(Boolean).join(' · ');
   const meta = s.kind === 'task'
     ? `last ${s.lastRun || '—'}${s.nextRun ? ` · next ${s.nextRun}` : ''}`
+    : s.kind === 'hermes'
+      ? hermesMeta
     : (s.pid ? `pid ${s.pid}` : s.detail);
   const acts = s.taskName
     ? actionBtn('restart', `data-id="${esc(s.id)}"`, 'restart') + actionBtn('stop', `data-id="${esc(s.id)}"`, 'stop')

@@ -4,7 +4,8 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { parseArgs, formatCheckTable, main, registerStaticTokenAccount } from '../src/cli.ts';
+import { parseArgs, formatCheckTable, main, registerCodexAccount, registerStaticTokenAccount } from '../src/cli.ts';
+import { loadConfig, saveConfig } from '../src/config.ts';
 import type { NormalizedUsage, SubtrackConfig } from '../src/types.ts';
 
 async function withTmp(prefix: string, fn: (dir: string) => Promise<void>) {
@@ -92,6 +93,135 @@ test('registerStaticTokenAccount stores a refresh-less setup-token and registers
     assert.equal(file.claudeAiOauth.accessToken, 'sk-ant-oat01-STATIC');
     assert.equal('refreshToken' in file.claudeAiOauth, false); // nothing to rotate, ever
     assert.equal('expiresAt' in file.claudeAiOauth, false);    // long-lived: no fake expiry
+  });
+});
+
+function fakeIdToken(email: string): string {
+  return `header.${Buffer.from(JSON.stringify({ email })).toString('base64url')}.signature`;
+}
+
+async function writeCodexAuth(home: string, email = 'codex@example.com'): Promise<void> {
+  await writeFile(join(home, 'auth.json'), JSON.stringify({
+    tokens: { access_token: 'access', account_id: 'account', id_token: fakeIdToken(email) },
+  }), 'utf8');
+}
+
+test('cancelled Codex login does not register a broken account', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const code = await silenced(() => registerCodexAccount(base, 'codex-1', undefined, async () => false));
+
+    assert.equal(code, 2);
+    assert.equal((await loadConfig(base)).accounts.length, 0);
+  });
+});
+
+test('Codex onboarding verifies auth.json before registering and derives the email label', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const code = await silenced(() => registerCodexAccount(base, 'codex-1', undefined, async (_cmd, _args, env) => {
+      await writeCodexAuth(env.CODEX_HOME!, 'one@example.com');
+      return true;
+    }));
+
+    assert.equal(code, 0);
+    const account = (await readCfg(base)).accounts[0]!;
+    assert.equal(account.id, 'codex-1');
+    assert.equal(account.label, 'one@example.com');
+    assert.equal(account.credentialsHome, join(base, '.subtrack', 'codex-homes', 'codex-1'));
+  });
+});
+
+test('Codex onboarding registers a valid orphaned home without relaunching login', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const home = join(base, '.subtrack', 'codex-homes', 'codex-orphan');
+    await mkdir(home, { recursive: true });
+    await writeCodexAuth(home, 'orphan@example.com');
+    let runs = 0;
+
+    const code = await silenced(() => registerCodexAccount(base, 'codex-orphan', undefined, async () => { runs++; return false; }));
+
+    assert.equal(code, 0);
+    assert.equal(runs, 0);
+    assert.equal((await readCfg(base)).accounts[0]!.label, 'orphan@example.com');
+  });
+});
+
+test('re-running add-account repairs an existing Codex account with missing auth.json', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const home = join(base, '.subtrack', 'codex-homes', 'codex-1');
+    await saveConfig({
+      version: 1,
+      port: 7777,
+      uiRefreshSeconds: 30,
+      pollIntervalSeconds: { claude: 180, codex: 60 },
+      accounts: [{ id: 'codex-1', label: 'Keep this label', provider: 'codex', enabled: true, credentialsHome: home }],
+    }, base);
+    let runs = 0;
+    const code = await silenced(() => registerCodexAccount(base, 'codex-1', undefined, async (_cmd, _args, env) => {
+      runs++;
+      await writeCodexAuth(env.CODEX_HOME!);
+      return true;
+    }));
+
+    assert.equal(code, 0);
+    assert.equal(runs, 1);
+    assert.equal((await readCfg(base)).accounts[0]!.label, 'Keep this label');
+  });
+});
+
+test('re-running add-account can refresh an existing Codex login', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const home = join(base, '.subtrack', 'codex-homes', 'codex-1');
+    await mkdir(home, { recursive: true });
+    await writeCodexAuth(home);
+    await saveConfig({
+      version: 1,
+      port: 7777,
+      uiRefreshSeconds: 30,
+      pollIntervalSeconds: { claude: 180, codex: 60 },
+      accounts: [{ id: 'codex-1', label: 'Healthy', provider: 'codex', enabled: true, credentialsHome: home }],
+    }, base);
+    let runs = 0;
+    const code = await silenced(() => registerCodexAccount(base, 'codex-1', undefined, async () => { runs++; return true; }));
+
+    assert.equal(code, 0);
+    assert.equal(runs, 1);
+  });
+});
+
+test('cancelled repair keeps the existing Codex account without claiming success', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const home = join(base, '.subtrack', 'codex-homes', 'codex-1');
+    await mkdir(home, { recursive: true });
+    await writeCodexAuth(home);
+    await saveConfig({
+      version: 1,
+      port: 7777,
+      uiRefreshSeconds: 30,
+      pollIntervalSeconds: { claude: 180, codex: 60 },
+      accounts: [{ id: 'codex-1', label: 'Still here', provider: 'codex', enabled: true, credentialsHome: home }],
+    }, base);
+
+    const code = await silenced(() => registerCodexAccount(base, 'codex-1', undefined, async () => false));
+
+    assert.equal(code, 2);
+    assert.equal((await readCfg(base)).accounts[0]!.label, 'Still here');
+  });
+});
+
+test('add-account refuses to run codex login inside an externally-owned readonly home', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const home = join(base, 'external-hermes');
+    await saveConfig({
+      version: 1,
+      port: 7777,
+      uiRefreshSeconds: 30,
+      pollIntervalSeconds: { claude: 180, codex: 60 },
+      accounts: [{ id: 'codex-shared', label: 'Shared', provider: 'codex', enabled: true, credentialsHome: home, credentialsMode: 'readonly' }],
+    }, base);
+    let runs = 0;
+    const code = await silenced(() => registerCodexAccount(base, 'codex-shared', undefined, async () => { runs++; return true; }));
+    assert.equal(code, 2);
+    assert.equal(runs, 0);
   });
 });
 

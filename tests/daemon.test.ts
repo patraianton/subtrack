@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { nextBackoff, checkHealth, pidAlive, logFilePath, lockFilePath, vbsPath, TASK_NAME } from '../src/daemon.ts';
+import { mkdtemp, mkdir, writeFile, readFile, utimes, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { nextBackoff, checkHealth, pidAlive, logFilePath, lockFilePath, vbsPath, TASK_NAME, acquireLock } from '../src/daemon.ts';
 import { vbsContent, installScript, uninstallScript } from '../src/install.ts';
 import { shouldOpenBrowser, createApp } from '../src/server.ts';
 import { SnapshotStore } from '../src/snapshotStore.ts';
@@ -81,4 +83,32 @@ test('shouldOpenBrowser: explicit opts win, else SUBTRACK_NO_OPEN gates it', () 
   assert.equal(shouldOpenBrowser({ open: false }, {}), false);
   assert.equal(shouldOpenBrowser({}, { SUBTRACK_NO_OPEN: '1' }), false);              // daemon → silent
   assert.equal(shouldOpenBrowser({}, {}), true);                                      // interactive default
+});
+
+async function withLockTmp(fn: (base: string) => Promise<void>) {
+  const base = await mkdtemp(join(tmpdir(), 'subtrack-daemon-'));
+  try { await mkdir(join(base, '.subtrack'), { recursive: true }); await fn(base); }
+  finally { await rm(base, { recursive: true, force: true }); }
+}
+
+test('acquireLock takes over a STALE lock (old mtime) even if its pid is a live/recycled pid', async () => {
+  await withLockTmp(async (base) => {
+    const lock = lockFilePath(base);
+    await writeFile(lock, String(process.pid), 'utf8');   // our own pid → pidAlive() is true
+    const old = new Date(Date.now() - 5 * 60_000);        // but backdate the lock 5 minutes
+    await utimes(lock, old, old);
+    // runDaemon only calls acquireLock once the dashboard is already down, so an OLD lock whose pid
+    // is "alive" is a recycled pid / wedged daemon and must be taken over — not stood down on, which
+    // is exactly the bug that left the dashboard dead with the self-heal unable to recover.
+    assert.equal(await acquireLock(base), true);
+    assert.equal((await readFile(lock, 'utf8')).trim(), String(process.pid));
+  });
+});
+
+test('acquireLock stands down for a FRESH lock held by a live pid (real double-start race)', async () => {
+  await withLockTmp(async (base) => {
+    const lock = lockFilePath(base);
+    await writeFile(lock, String(process.pid), 'utf8');   // fresh mtime = now, pid alive → real owner
+    assert.equal(await acquireLock(base), false);
+  });
 });

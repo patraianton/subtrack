@@ -10,6 +10,7 @@ export interface ServicesDeps {
   httpProbe?: typeof probeHttp;
   now?: () => number;
   cacheMs?: number;
+  additionalServices?: () => ServiceHealth[];
 }
 
 function untrackedRunners(defs: ServiceDef[], sys: SystemState): UntrackedRunner[] {
@@ -34,6 +35,7 @@ async function build(deps: ServicesDeps): Promise<ServicesResponse> {
     if (def.kind === 'http' && def.port !== undefined) httpOk = await httpProbe(def.port, def.httpPath ?? '/', 1500);
     services.push(probeService(def, sys, httpOk));
   }
+  if (deps.additionalServices) services.push(...deps.additionalServices());
   services.sort(byUrgency);
   return { services, untracked: untrackedRunners(defs, sys), generatedAt: new Date(now).toISOString() };
 }

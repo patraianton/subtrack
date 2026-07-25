@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>subtrack · sessions</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>subtrack</h1>
+    <nav class="tabs"><a href="/">Usage</a><a href="/sessions.html" class="active">Sessions</a><a href="/services.html">Services</a><a href="/conveyor.html">Конвейер</a></nav>
+    <span id="sessions-summary" class="summary"></span>
+    <span id="updated" class="updated"></span>
+  </header>
+
+  <main class="sessions-page">
+    <aside id="sessions-notice" class="sessions-notice" hidden></aside>
+
+    <section class="sessions-section" aria-labelledby="open-windows-heading">
+      <div class="sessions-section-head">
+        <div>
+          <h2 id="open-windows-heading">Open Claude windows</h2>
+          <p>Open means a live local Claude process. A launch ID is the UUID used to start it and may be stale after <code>/clear</code>.</p>
+        </div>
+        <span id="window-count" class="sessions-count"></span>
+      </div>
+      <div id="session-windows" class="session-windows" aria-live="polite">
+        <p class="empty">Loading open windows…</p>
+      </div>
+      <p class="sessions-legend"><strong>launch</strong> = UUID seen in the process arguments · <strong>likely</strong> = inferred from account, folder, and start time · <strong>unknown</strong> = no safe transcript match</p>
+    </section>
+
+    <section class="sessions-section" aria-labelledby="session-history-heading">
+      <div class="sessions-section-head sessions-history-head">
+        <div>
+          <h2 id="session-history-heading">Session history</h2>
+          <p><strong>Recent</strong> means the local history changed recently; it does not prove that a window is open.</p>
+        </div>
+        <span id="session-count" class="sessions-count"></span>
+      </div>
+
+      <form id="sessions-filters" class="sessions-filters" role="search">
+        <label class="sessions-search">
+          <span class="sr-only">Search sessions</span>
+          <input id="session-search" type="search" autocomplete="off" placeholder="Search title, project, folder, account, or session ID" />
+        </label>
+        <label>
+          <span class="sr-only">Provider</span>
+          <select id="session-provider">
+            <option value="all">All providers</option>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+          </select>
+        </label>
+        <label>
+          <span class="sr-only">Activity</span>
+          <select id="session-scope">
+            <option value="working">Working: open + recent</option>
+            <option value="all">All sessions</option>
+          </select>
+        </label>
+      </form>
+
+      <div id="session-history" class="session-history" aria-live="polite">
+        <p class="empty">Loading sessions…</p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/sessions.js"></script>
+</body>
+</html>

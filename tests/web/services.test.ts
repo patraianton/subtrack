@@ -53,3 +53,16 @@ test('renderServices adds a register button for untracked runners', () => {
   const html = renderServices(data, 0);
   assert.match(html, /data-action="register"[^>]*data-pid="5"/);
 });
+
+test('renderServices shows Hermes subscription, PID, checked time and auto-heal state', () => {
+  const payload = {
+    services: [{ id: 'hermes-alexey', label: 'alexey', group: 'Hermes · Subscription A', kind: 'hermes', status: 'up', detail: 'gateway running; Telegram connected', alwaysOn: true, pid: 42, lastRun: null, nextRun: null, checkedAt: '2026-07-17T12:00:00Z', subscription: 'Subscription A', autoHeal: true }],
+    untracked: [], generatedAt: '2026-07-17T12:00:00Z',
+  };
+  const html = renderServices(payload, Date.parse(payload.generatedAt));
+  assert.match(html, /alexey/);
+  assert.match(html, /Subscription A/);
+  assert.match(html, /pid 42/);
+  assert.match(html, /auto-heal on/);
+  assert.doesNotMatch(html, /data-action="restart"/);
+});
