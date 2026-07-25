@@ -57,3 +57,23 @@ test('caches within cacheMs (the gatherer runs once for two quick calls)', async
     assert.equal(runs, 1);
   });
 });
+
+test('merges the latest background Hermes rows without probing them from the GET path', async () => {
+  await withTempBase(async (base) => {
+    await saveServices([], base);
+    let reads = 0;
+    const get = makeGetServices({
+      base,
+      run: async () => ({ code: 0, stdout: SAMPLE, stderr: '' }),
+      now: () => 1000,
+      additionalServices: () => {
+        reads++;
+        return [{ id: 'hermes-alexey', label: 'alexey', kind: 'hermes', alwaysOn: true, group: 'Hermes', status: 'up', detail: 'gateway running', pid: 42, lastRun: null, nextRun: null, checkedAt: '2026-07-17T12:00:00Z', autoHeal: true }];
+      },
+    });
+    const result = await get();
+    assert.equal(result.services.find((service) => service.id === 'hermes-alexey')?.status, 'up');
+    await get();
+    assert.equal(reads, 1, 'the normal Services cache reuses the monitor snapshot');
+  });
+});

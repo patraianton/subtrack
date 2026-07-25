@@ -6,17 +6,19 @@ import { pathToFileURL } from 'node:url';
 import type { AccountConfig, NormalizedUsage } from './types.ts';
 import { loadConfig, saveConfig, addAccount, removeAccount, renameAccount, configDir } from './config.ts';
 import { claudeHomeDir, buildClaudeLogin, readClaudeOauth } from './auth/claude.ts';
-import { codexHomeDir, buildCodexLogin } from './auth/codex.ts';
+import { codexHomeDir, buildCodexLogin, readCodexAuth } from './auth/codex.ts';
 import { makeFetchUsage } from './adapters/index.ts';
 
-/** Spawn an interactive child (stdio inherited) and resolve when it exits. */
-function runInteractive(cmd: string, args: string[], env: Record<string, string>): Promise<void> {
-  return new Promise<void>((resolve) => {
+/** Spawn an interactive child (stdio inherited) and report whether it exited successfully. */
+function runInteractive(cmd: string, args: string[], env: Record<string, string>): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
     const child = spawn(cmd, args, { stdio: 'inherit', env: { ...process.env, ...env }, shell: true });
-    child.on('exit', () => resolve());
-    child.on('error', () => resolve());
+    child.on('exit', (code) => resolve(code === 0));
+    child.on('error', () => resolve(false));
   });
 }
+
+export type InteractiveRunner = (cmd: string, args: string[], env: Record<string, string>) => Promise<boolean>;
 
 export interface ParsedArgs {
   cmd: string;
@@ -164,6 +166,61 @@ async function readStdinText(): Promise<string> {
   return out.trim();
 }
 
+/**
+ * Complete or repair an isolated Codex login before registering it. Unlike the original onboarding
+ * path, a cancelled login never creates a configured account with a missing auth.json. Re-running
+ * add-account repairs an already-configured broken Codex home instead of demanding remove/re-add.
+ */
+export async function registerCodexAccount(
+  base: string,
+  id: string,
+  labelFlag?: string,
+  interactive: InteractiveRunner = runInteractive,
+): Promise<number> {
+  const cfg = await loadConfig(base);
+  const existing = cfg.accounts.find((account) => account.id === id);
+  if (existing && existing.provider !== 'codex') {
+    console.error(`Account "${id}" already exists with provider ${existing.provider}.`);
+    return 2;
+  }
+  if (existing?.credentialsMode === 'readonly') {
+    console.error(`Account "${id}" uses externally-owned Codex credentials. Repair or re-login with their owner; subtrack refuses to run codex login in that home.`);
+    return 2;
+  }
+
+  const home = existing?.credentialsHome ?? codexHomeDir(configDir(base), id);
+  await mkdir(home, { recursive: true });
+  let authenticated = false;
+  try { await readCodexAuth(home); authenticated = true; } catch { /* login or repair below */ }
+
+  if (existing || !authenticated) {
+    console.log(`\nLaunching: codex login (CODEX_HOME=${home}). Log in as this Codex account.\n`);
+    const spec = buildCodexLogin(home);
+    const completed = await interactive(spec.cmd, spec.args, spec.env);
+    if (!completed) {
+      console.error(`Codex login did not complete for ${id}. Re-run the same add-account command to try again.`);
+      return 2;
+    }
+    authenticated = false;
+    try { await readCodexAuth(home); authenticated = true; } catch { /* actionable error below */ }
+  }
+  if (!authenticated) {
+    console.error(`No Codex login found in ${home}. Complete the login, then re-run the same add-account command.`);
+    return 2;
+  }
+
+  const acc: AccountConfig = existing
+    ? { ...existing, credentialsHome: home, label: labelFlag ?? existing.label }
+    : { id, label: id, provider: 'codex', enabled: true, credentialsHome: home };
+  if (!existing) acc.label = labelFlag ?? ((await accountEmail(acc)) || id);
+  const next = existing
+    ? { ...cfg, accounts: cfg.accounts.map((account) => account.id === id ? acc : account) }
+    : addAccount(cfg, acc);
+  await saveConfig(next, base);
+  console.log(existing ? `Repaired Codex login for ${id} (${acc.label}).` : `Added Codex account ${id} (${acc.label}).`);
+  return 0;
+}
+
 async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
   const id = args.positionals[0];
   const provider = args.flags.provider;
@@ -178,6 +235,7 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
     console.error('--readonly-home / --static-token are Claude-only.');
     return 2;
   }
+  if (provider === 'codex') return registerCodexAccount(base, id, labelFlag);
   const cfg = await loadConfig(base);
   if (cfg.accounts.some((a) => a.id === id)) {
     console.error(`Account "${id}" already exists — run \`remove-account ${id}\` first to redo it.`);
@@ -209,16 +267,6 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
     acc.label = labelFlag ?? ((await accountEmail(acc)) || id!); // default the label to the account's email
     await saveConfig(addAccount(cfg, acc), base);
     console.log(`Added Claude account ${id} (${acc.label}) — isolated; subtrack auto-refreshes it (no manual rotation).`);
-  } else {
-    const home = codexHomeDir(configDir(base), id!);
-    await mkdir(home, { recursive: true });
-    console.log(`\nLaunching: codex login (CODEX_HOME=${home}). Log in as this Codex account.\n`);
-    const spec = buildCodexLogin(home);
-    await runInteractive(spec.cmd, spec.args, spec.env);
-    const acc: AccountConfig = { id: id!, label: id!, provider: 'codex', enabled: true, credentialsHome: home };
-    acc.label = labelFlag ?? ((await accountEmail(acc)) || id!); // default the label to the account's email
-    await saveConfig(addAccount(cfg, acc), base);
-    console.log(`Added Codex account ${id} (${acc.label}).`);
   }
   return 0;
 }

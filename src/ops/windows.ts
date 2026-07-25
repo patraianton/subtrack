@@ -4,15 +4,34 @@ import type { SystemState, TaskState, ProcInfo } from './types.ts';
 export type PwshResult = { code: number; stdout: string; stderr: string };
 export type PwshRunner = (script: string) => Promise<PwshResult>;
 
+const PWSH_TIMEOUT_MS = 30_000;
+
 /** Real PowerShell runner — same invocation shape as src/install.ts. */
 export const runPwsh: PwshRunner = (script) =>
   new Promise((resolve) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true });
     let stdout = '', stderr = '';
+    let settled = false;
+    let timedOut = false;
+    const finish = (result: PwshResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, PWSH_TIMEOUT_MS);
+    timer.unref();
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
-    child.on('exit', (c) => resolve({ code: c ?? 0, stdout, stderr }));
-    child.on('error', (e) => resolve({ code: 1, stdout, stderr: String(e) }));
+    child.on('close', (code, signal) => finish({
+      code: code ?? 1,
+      stdout,
+      stderr: timedOut ? 'PowerShell timed out' : (stderr || (signal ? `PowerShell stopped (${signal})` : '')),
+    }));
+    child.on('error', (error) => finish({ code: 1, stdout, stderr: String(error) }));
   });
 
 /**

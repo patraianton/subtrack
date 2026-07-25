@@ -37,3 +37,41 @@ test('readCodexAuth throws when access_token missing', async () => {
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test('readCodexAuth reads an externally-owned Hermes shared store without rewriting it', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'codexhome-hermes-'));
+  try {
+    const authPath = join(home, 'auth.json');
+    const raw = JSON.stringify({ providers: { 'openai-codex': { account_id: 'acct_shared', tokens: { access_token: 'shared-at', refresh_token: 'shared-rt' } } } });
+    await writeFile(authPath, raw, 'utf8');
+    const out = await readCodexAuth(home);
+    assert.deepEqual(out, { accessToken: 'shared-at', accountId: 'acct_shared' });
+    assert.equal(await (await import('node:fs/promises')).readFile(authPath, 'utf8'), raw);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('readCodexAuth turns a missing file into an actionable login command', async () => {
+  const home = await mkdtemp(join(tmpdir(), "codexhome-O'Brien-"));
+  try {
+    await assert.rejects(
+      () => readCodexAuth(home),
+      (error: Error) => error.message.includes('Codex login missing')
+        && error.message.includes(`CODEX_HOME='${home.replace(/'/g, "''")}'`)
+        && error.message.includes('codex login'),
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('readCodexAuth never recommends codex login for an externally-owned Hermes home', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'codexhome-external-'));
+  try {
+    await assert.rejects(
+      () => readCodexAuth(home, { externalOwner: true }),
+      (error: Error) => /owning Hermes login/i.test(error.message) && !/run:.*codex login/i.test(error.message),
+    );
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

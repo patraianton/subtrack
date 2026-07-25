@@ -68,6 +68,8 @@ export function probeService(def: ServiceDef, sys: SystemState, httpOk?: boolean
     }
     case 'task':
       return probeTask(def, sys);
+    case 'hermes':
+      return health(def, 'unknown', 'Hermes rows are supplied by the background fleet monitor');
     // Reachable: services.json is cast to ServiceDef without runtime validation, so an unrecognized kind can arrive here.
     default:
       return health(def, 'unknown', `unknown kind "${(def as ServiceDef).kind}"`);

@@ -1,4 +1,4 @@
-export type ServiceKind = 'task' | 'process' | 'port' | 'http';
+export type ServiceKind = 'task' | 'process' | 'port' | 'http' | 'hermes';
 export type ServiceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 
 export interface ServiceDef {
@@ -38,6 +38,12 @@ export interface ServiceHealth extends ServiceDef {
   pid: number | null;
   lastRun: string | null;
   nextRun: string | null;
+  /** Background-monitor metadata. These fields never contain credential paths or tokens. */
+  checkedAt?: string;
+  subscription?: string;
+  autoHeal?: boolean;
+  lastRestartAt?: string | null;
+  consecutiveFailures?: number;
 }
 
 export interface UntrackedRunner {

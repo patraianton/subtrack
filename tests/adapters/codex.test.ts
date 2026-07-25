@@ -56,6 +56,31 @@ test('fetchCodexUsage maps 401 to auth_error', async () => {
   assert.match(u.error ?? '', /codex login/i);
 });
 
+test('fetchCodexUsage routes readonly 401 recovery to the external Hermes owner', async () => {
+  const fetchImpl = (async () => new Response('', { status: 401 })) as unknown as typeof fetch;
+  let externalOwner = false;
+  const deps = { readAuth: async (_home: string, opts?: { externalOwner?: boolean }) => { externalOwner = opts?.externalOwner === true; return { accessToken: 'AT', accountId: 'a' }; }, fetchImpl };
+  const usage = await fetchCodexUsage({ ...ACC, credentialsMode: 'readonly' }, deps, NOW);
+  assert.equal(externalOwner, true);
+  assert.equal(usage.status, 'auth_error');
+  assert.match(usage.error ?? '', /owning Hermes/i);
+  assert.doesNotMatch(usage.error ?? '', /CODEX_HOME|codex login \(/i);
+});
+
+test('fetchCodexUsage maps credential read failures to auth_error without a network call', async () => {
+  let fetched = false;
+  const deps = {
+    readAuth: async () => { throw new Error('Codex login missing — run: codex login'); },
+    fetchImpl: (async () => { fetched = true; return new Response('{}'); }) as unknown as typeof fetch,
+  };
+
+  const usage = await fetchCodexUsage(ACC, deps, NOW);
+
+  assert.equal(usage.status, 'auth_error');
+  assert.match(usage.error ?? '', /codex login/i);
+  assert.equal(fetched, false);
+});
+
 test('normalizeCodexUsage flags an unexpected 200 body as error', () => {
   const u = normalizeCodexUsage({ something: 'unexpected' }, ACC, NOW);
   assert.equal(u.status, 'error');

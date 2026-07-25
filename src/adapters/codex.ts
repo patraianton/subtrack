@@ -57,7 +57,7 @@ export function normalizeCodexUsage(snapshot: unknown, account: AccountConfig, n
 }
 
 export interface CodexFetchDeps {
-  readAuth(home: string): Promise<{ accessToken: string; accountId: string }>;
+  readAuth(home: string, opts?: { externalOwner?: boolean }): Promise<{ accessToken: string; accountId: string }>;
   fetchImpl?: typeof fetch;
 }
 
@@ -66,13 +66,21 @@ export async function fetchCodexUsage(account: AccountConfig, deps: CodexFetchDe
   if (!account.credentialsHome) {
     return { ...shell, status: 'auth_error', error: 'No credentialsHome configured — run add-account' };
   }
+  let credentials: { accessToken: string; accountId: string };
   try {
-    const { accessToken, accountId } = await deps.readAuth(account.credentialsHome);
+    credentials = await deps.readAuth(account.credentialsHome, { externalOwner: account.credentialsMode === 'readonly' });
+  } catch (e) {
+    return { ...shell, status: 'auth_error', error: e instanceof Error ? e.message : String(e) };
+  }
+  try {
+    const { accessToken, accountId } = credentials;
     const res = await fetchWithRetry(USAGE_URL, {
       headers: { authorization: `Bearer ${accessToken}`, 'chatgpt-account-id': accountId },
     }, { fetchImpl: deps.fetchImpl });
     if (res.status === 401) {
-      return { ...shell, status: 'auth_error', error: `Codex token expired — run: codex login (CODEX_HOME=${account.credentialsHome})` };
+      return account.credentialsMode === 'readonly'
+        ? { ...shell, status: 'auth_error', error: 'Externally-owned Codex token rejected — repair/refresh it with the owning Hermes login' }
+        : { ...shell, status: 'auth_error', error: `Codex token expired — run: codex login (CODEX_HOME=${account.credentialsHome})` };
     }
     if (res.status === 429) {
       return { ...shell, status: 'throttled', error: 'Rate limited (HTTP 429)' };

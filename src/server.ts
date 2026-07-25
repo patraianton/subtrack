@@ -14,6 +14,10 @@ import type { ServicesResponse, ActionRequest, ActionResult } from './ops/types.
 import { makeGetServices } from './ops/services.ts';
 import { makeRunServiceAction } from './ops/actions.ts';
 import { runPwsh } from './ops/windows.ts';
+import type { SessionsResponse } from './sessions/types.ts';
+import { makeGetSessions } from './sessions/scan.ts';
+import { HermesFleetMonitor } from './hermes/monitor.ts';
+import { HermesMonitorSupervisor } from './hermes/supervisor.ts';
 
 export interface ApiWindow extends UsageWindow { severity: Severity }
 export interface EnrichedUsage extends Omit<NormalizedUsage, 'session' | 'weekly' | 'weeklyOpus' | 'fable'> {
@@ -33,7 +37,7 @@ export function enrichUsage(u: NormalizedUsage): EnrichedUsage {
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
-export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: { claude: number; codex: number }; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult> }): Server {
+export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: { claude: number; codex: number }; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult>; getSessions?: () => Promise<SessionsResponse> }): Server {
   return createServer(async (req, res) => {
     const url = (req.url ?? '/').split('?')[0]!;
     try {
@@ -55,6 +59,26 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
         catch (e) { safeWrite(res, 500, { error: 'action failed', detail: String((e as Error).message) }); return; }
       }
       if (url === '/api/health') return json(res, { ok: true });
+      if (url === '/api/conveyor') {
+        const noStore = { 'cache-control': 'no-store' };
+        try {
+          const raw = await readFile(join(homedir(), '.autopase-conveyor-status.json'), 'utf8');
+          return json(res, JSON.parse(raw) as unknown, noStore);
+        } catch {
+          return json(res, { project: null, task: null, timeline: [] }, noStore);
+        }
+      }
+      if (url === '/api/sessions') {
+        const noStore = { 'cache-control': 'no-store' };
+        if (req.method !== 'GET') { safeWrite(res, 405, { error: 'method not allowed' }, { ...noStore, allow: 'GET' }); return; }
+        if (!opts.getSessions) { safeWrite(res, 503, { error: 'sessions unavailable' }, noStore); return; }
+        try {
+          return json(res, await opts.getSessions(), noStore);
+        } catch (e) {
+          safeWrite(res, 500, { error: 'sessions failed', detail: String((e as Error).message) }, noStore);
+          return;
+        }
+      }
       if (url === '/api/services') {
         if (!opts.getServices) { res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'services unavailable' })); return; }
         try {
@@ -90,13 +114,13 @@ function byTightest(a: EnrichedUsage, b: EnrichedUsage): number {
   return maxUtil(b) - maxUtil(a);
 }
 
-function json(res: ServerResponse, body: unknown): void {
-  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
+function json(res: ServerResponse, body: unknown, headers: Record<string, string> = {}): void {
+  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', ...headers }).end(JSON.stringify(body));
 }
 
-function safeWrite(res: ServerResponse, status: number, body: unknown): void {
+function safeWrite(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   if (res.writableEnded || res.headersSent) return;
-  try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body)); } catch { /* socket gone */ }
+  try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...headers }).end(JSON.stringify(body)); } catch { /* socket gone */ }
 }
 
 function readBody(req: import('node:http').IncomingMessage): Promise<string> {
@@ -124,9 +148,14 @@ export async function serve(base: string = homedir(), opts: { open?: boolean } =
   const poller = new Poller({ config: cfg, fetchUsage, store });
   poller.start();
   const webDir = fileURLToPath(new URL('../web/', import.meta.url)); // decode %20 etc — never use .pathname on Windows
-  const getServices = makeGetServices({ base, run: runPwsh });
+  const hermesSupervisor = new HermesMonitorSupervisor({
+    create: () => HermesFleetMonitor.create({ base, runPwsh }),
+    onError: (error) => console.error(`Hermes monitor initialization failed: ${error.message}`),
+  });
+  const getServices = makeGetServices({ base, run: runPwsh, additionalServices: () => hermesSupervisor.serviceRows() });
   const runServiceAction = makeRunServiceAction({ base, run: runPwsh });
-  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction });
+  const getSessions = makeGetSessions({ base, accounts: cfg.accounts, run: runPwsh });
+  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction, getSessions });
   // Reject (rather than hang) if the port is taken — the daemon supervisor reacts to the non-zero exit.
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => reject(err);
@@ -134,6 +163,10 @@ export async function serve(base: string = homedir(), opts: { open?: boolean } =
     server.listen(cfg.port, '127.0.0.1', () => { server.off('error', onError); resolve(); });
   });
   server.on('error', (err) => console.error(`server error: ${err.message}`));
+  server.once('close', () => hermesSupervisor.stop());
+  // The monitor may invoke credential-owner canaries or gateway recovery, so
+  // it must never start in a contender that failed the exclusive port bind.
+  await hermesSupervisor.start();
   const dashUrl = `http://localhost:${cfg.port}`;
   console.log(`subtrack dashboard → ${dashUrl}  (polling ${cfg.accounts.filter((a) => a.enabled).length} accounts)`);
   if (shouldOpenBrowser(opts)) await open(dashUrl);

@@ -14,6 +14,8 @@ const LOG_MAX_BYTES = 5 * 1024 * 1024; // rotate once past 5 MB
 const BACKOFF_BASE_MS = 2_000;
 const BACKOFF_MAX_MS = 60_000;
 const HEALTHY_RUN_MS = 30_000; // a serve child that lived this long resets the backoff
+const LOCK_FRESH_MS = 30_000;  // a lock held by a live pid this recently = a daemon still booting;
+                               // older than this (with the dashboard down) = a stale/recycled-pid lock
 
 /** Repo root (parent of src/) — where `node_modules` lives so `--import tsx` resolves. */
 export function repoRoot(): string {
@@ -73,7 +75,7 @@ async function rotateLog(path: string): Promise<void> {
 }
 
 /** Exclusive PID lock so a second daemon (e.g. from the self-heal trigger) is a no-op. */
-async function acquireLock(base: string): Promise<boolean> {
+export async function acquireLock(base: string): Promise<boolean> {
   const p = lockFilePath(base);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -82,8 +84,14 @@ async function acquireLock(base: string): Promise<boolean> {
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
       const pid = Number((await readFile(p, 'utf8').catch(() => '')).trim());
-      if (pid && pidAlive(pid)) return false;              // another live daemon holds it
-      await rm(p, { force: true }).catch(() => {});        // stale lock → best-effort clear, then retry
+      // runDaemon only calls us after checkHealth already failed, so nothing is serving. A live pid
+      // is a real owner ONLY if the lock is FRESH — a daemon that just wrote it and is still booting.
+      // An OLD lock whose pid happens to be "alive" is a recycled pid (Windows reuses them) or a
+      // wedged daemon; a healthy one would be answering by now. Standing down there leaves the
+      // dashboard dead and the self-heal unable to recover — so take the lock over instead.
+      const ageMs = await stat(p).then((s) => Date.now() - s.mtimeMs).catch(() => Infinity);
+      if (pid && pidAlive(pid) && ageMs < LOCK_FRESH_MS) return false; // another daemon is booting
+      await rm(p, { force: true }).catch(() => {});        // stale/recycled lock → clear, then retry
     }
   }
   return false;
