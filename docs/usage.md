@@ -257,7 +257,7 @@ Countdowns and visible times use the browser's local clock and time zone. They a
 
 ### Ordering, refresh, and last-known values
 
-- Cards are grouped Claude first, then Codex.
+- Cards are grouped Claude first, then Codex. Within each group, the account whose weekly-class reset (weekly, Opus, or Fable) is nearest comes first; accounts with no known reset sort last, ties break by label. Session resets do not affect ordering.
 - The `Tightest` summary selects the highest utilization among the available session, weekly, Opus, and Fable windows.
 - The page's `updated` time is the browser receipt/render time, not a provider timestamp.
 - The current browser implementation refreshes `/api/usage` every 30 seconds even if `uiRefreshSeconds` is configured differently.
