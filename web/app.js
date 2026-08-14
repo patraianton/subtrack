@@ -44,11 +44,26 @@ function card(u, now) {
     + gauge('session', u.session, now) + gauge('weekly', u.weekly, now) + opus + fable + note + `</section>`;
 }
 
-// Group cards by provider (Claude first, then Codex), keeping the server's tightest-first order within
-// each group. A full-width header before each group forces the next provider onto a new grid row.
+// Group cards by provider (Claude first, then Codex). Within each group the soonest weekly-class
+// reset comes first (Anton 2026-08-08: "с какими работать" — ближайший сброс наверху); accounts
+// with no known reset sink to the end of their group. Session resets are ignored here — they
+// cycle every 5h and would reshuffle the grid constantly.
 const PROVIDER_ORDER = { claude: 0, codex: 1 };
+function nearestWeeklyReset(u) {
+  let t = Infinity;
+  for (const w of [u.weekly, u.weeklyOpus, u.fable]) {
+    if (w && w.resetsAt) {
+      const v = Date.parse(w.resetsAt);
+      if (!Number.isNaN(v) && v < t) t = v;
+    }
+  }
+  return t;
+}
 function renderGrouped(accounts, now) {
-  const ordered = [...accounts].sort((a, b) => (PROVIDER_ORDER[a.provider] ?? 9) - (PROVIDER_ORDER[b.provider] ?? 9));
+  const ordered = [...accounts].sort((a, b) =>
+    ((PROVIDER_ORDER[a.provider] ?? 9) - (PROVIDER_ORDER[b.provider] ?? 9))
+    || (nearestWeeklyReset(a) - nearestWeeklyReset(b))
+    || String(a.label).localeCompare(String(b.label)));
   let html = '', group = null;
   for (const u of ordered) {
     if (u.provider !== group) { group = u.provider; html += `<h2 class="group ${group}">${group}</h2>`; }

@@ -151,7 +151,7 @@ Severity is computed at response time:
 
 There is no input-domain validation before this calculation. Values below zero, above 100, or non-finite internal values are not normalized safely.
 
-Accounts are sorted descending by the maximum utilization among `session`, `weekly`, and `fable`; missing windows count below all numeric values. `weeklyOpus` is intentionally absent from this server sort. Ties retain the store's insertion order. The Usage browser then groups Claude before Codex and preserves server order only within each group.
+Accounts are sorted descending by the maximum utilization among `session`, `weekly`, and `fable`; missing windows count below all numeric values. `weeklyOpus` is intentionally absent from this server sort. Ties retain the store's insertion order. The Usage browser then groups Claude before Codex and re-sorts within each group by the nearest weekly-class reset (see [Usage guide](usage.md)); the server order is not preserved in the UI.
 
 Configured provider polling defaults are 180 seconds for Claude and 60 seconds for Codex. The server exposes them for stale display logic; it does not promise that an upstream attempt occurs exactly at that cadence because initial staggering, the five-second heartbeat, sequential due-account fetches, throttling backoff, and auth pauses apply.
 
