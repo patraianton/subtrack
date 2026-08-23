@@ -1,0 +1,134 @@
+:root { color-scheme: dark; --ok: #2ecc71; --warn: #f1c40f; --crit: #e74c3c; --bg: #0d1117; --card: #161b22; --fg: #e6edf3; --muted: #8b949e; --claude: #d97757; --codex: #10a37f; --grok: #c9d1d9; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.4 ui-sans-serif, system-ui, Segoe UI, sans-serif; background: var(--bg); color: var(--fg); }
+header { display: flex; align-items: baseline; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #21262d; }
+h1 { font-size: 18px; margin: 0; }
+.summary { color: var(--muted); }
+.updated { margin-left: auto; color: var(--muted); font-size: 12px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; padding: 20px; }
+.card { background: var(--card); border: 1px solid #21262d; border-radius: 10px; padding: 14px 16px; }
+.card.auth_error { border-color: var(--crit); }
+/* provider accent — an inset left stripe (box-shadow, so it never fights the auth_error border-color) */
+.card.claude { box-shadow: inset 3px 0 0 var(--claude); }
+.card.codex  { box-shadow: inset 3px 0 0 var(--codex); }
+.card.grok   { box-shadow: inset 3px 0 0 var(--grok); }
+/* full-width section header — forces each provider onto a fresh grid row */
+.group { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin: 2px 0 -4px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.group::before { content: ''; width: 10px; height: 10px; border-radius: 3px; }
+.group.claude::before { background: var(--claude); }
+.group.codex::before  { background: var(--codex); }
+.group.grok::before   { background: var(--grok); }
+.card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #21262d; color: var(--muted); text-transform: uppercase; }
+.badge.claude { background: var(--claude); color: #0d1117; }
+.badge.codex  { background: var(--codex); color: #0d1117; }
+.badge.grok   { background: var(--grok); color: #0d1117; }
+.label { font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; margin-left: 8px; }
+.dot.ok { background: var(--ok); } .dot.throttled, .dot.error { background: var(--muted); } .dot.auth_error { background: var(--crit); }
+/* status=stale: read-only creds expired, waiting on their owner (the CLI) to refresh — a warning,
+   not a failure. Status also lands as a `stale` card class, so the data-age dimming below applies. */
+.dot.stale { background: var(--warn); }
+.cardts { margin-left: auto; color: var(--muted); font-size: 11px; }
+.card.stale { opacity: 0.5; }
+.gauge { margin: 8px 0; }
+.gauge-top { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.bar { height: 8px; border-radius: 4px; background: #21262d; overflow: hidden; margin-top: 3px; }
+.fill { height: 100%; }
+.fill.ok { background: var(--ok); } .fill.warn { background: var(--warn); } .fill.crit { background: var(--crit); }
+.gauge.noaccess { opacity: 0.4; } /* Fable entitlement absent — show the fact, muted, no fill */
+.gauge.noaccess .gauge-top span:last-child { font-style: italic; }
+.err { color: var(--crit); font-size: 12px; margin-top: 6px; }
+.tabs { display: flex; gap: 12px; margin: 0 16px; }
+.tabs a { color: inherit; text-decoration: none; opacity: 0.6; padding: 2px 6px; border-radius: 6px; }
+.tabs a.active { opacity: 1; background: rgba(127,127,127,0.18); }
+.services { padding: 8px 16px; display: flex; flex-direction: column; gap: 4px; }
+.svc-group { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; margin: 14px 0 4px; }
+.svc-group.untracked { color: #b58900; }
+.svc { display: grid; grid-template-columns: 14px 1.4fr 60px 2fr 1fr; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; background: rgba(127,127,127,0.06); }
+.svc-dot { width: 10px; height: 10px; border-radius: 50%; background: #888; }
+.status-up .svc-dot { background: #2ecc71; }
+.status-degraded .svc-dot { background: #f1c40f; }
+.status-down .svc-dot { background: #e74c3c; }
+.status-unknown .svc-dot { background: #888; }
+.svc-kind { font-size: 0.75rem; opacity: 0.6; }
+.svc-detail, .svc-meta { font-size: 0.8rem; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { opacity: 0.6; padding: 16px; }
+.svc { grid-template-columns: 14px 1.4fr 60px 2fr 1fr auto; }
+.svc-acts { display: flex; gap: 6px; }
+.svc-act { font-size: 0.72rem; padding: 2px 8px; border-radius: 5px; border: 1px solid rgba(127,127,127,0.4); background: transparent; color: inherit; cursor: pointer; }
+.svc-act:hover { background: rgba(127,127,127,0.15); }
+.svc-act:disabled { opacity: 0.5; cursor: default; }
+
+/* Sessions is a read-only view of local Claude/Codex work, separate from Services. */
+.sessions-page { padding: 18px 20px 28px; display: flex; flex-direction: column; gap: 18px; }
+.sessions-section { min-width: 0; }
+.sessions-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.sessions-section-head h2 { margin: 0; font-size: 16px; }
+.sessions-section-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.sessions-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.sessions-notice { padding: 9px 12px; border: 1px solid rgba(241, 196, 15, 0.45); border-radius: 7px; background: rgba(241, 196, 15, 0.08); color: #f4d96b; font-size: 12px; }
+.session-windows, .session-history { display: flex; flex-direction: column; gap: 6px; }
+.session-window, .session-row { min-width: 0; border: 1px solid #21262d; border-radius: 8px; background: var(--card); }
+.session-window { display: grid; grid-template-columns: minmax(280px, 2fr) minmax(150px, .8fr) minmax(260px, 1.25fr) auto; align-items: center; gap: 12px; padding: 10px 12px; box-shadow: inset 3px 0 0 var(--claude); }
+.session-window-main, .session-row-main { min-width: 0; }
+.session-title-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.session-title-line h3, .session-row-main h3 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.session-live-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(46, 204, 113, .12); }
+.session-project { margin-top: 3px; color: var(--fg); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-cwd, .session-id { display: block; max-width: 100%; color: var(--muted); font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-cwd { margin-top: 2px; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
+.session-window-context, .session-row-account, .session-row-activity { min-width: 0; display: flex; flex-direction: column; color: var(--muted); font-size: 12px; }
+.session-window-context span, .session-window-context strong, .session-row-account span, .session-row-account strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-window-context strong, .session-row-account strong { color: var(--fg); font-weight: 600; }
+.session-window-context .session-separator { display: none; }
+.session-window-meta { min-width: 0; display: grid; grid-template-columns: auto auto minmax(90px, 1fr); align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
+.session-binding, .session-activity { width: fit-content; padding: 2px 6px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.binding-launch, .activity-open { background: rgba(46, 204, 113, .14); color: #5dde91; }
+.binding-likely, .activity-recent { background: rgba(241, 196, 15, .14); color: #f4d96b; }
+.binding-ambiguous { background: rgba(231, 76, 60, .14); color: #ef8175; }
+.binding-unknown, .activity-idle, .activity-archived { background: rgba(139, 148, 158, .14); color: var(--muted); }
+.sessions-legend { margin: 7px 2px 0; color: var(--muted); font-size: 11px; }
+.sessions-legend strong { color: var(--fg); }
+.sessions-history-head { margin-bottom: 8px; }
+.sessions-filters { display: grid; grid-template-columns: minmax(240px, 1fr) auto auto; gap: 8px; margin-bottom: 9px; }
+.sessions-filters input, .sessions-filters select { width: 100%; height: 34px; border: 1px solid #30363d; border-radius: 6px; outline: none; background: var(--card); color: var(--fg); padding: 0 10px; font: inherit; }
+.sessions-filters input:focus, .sessions-filters select:focus { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88, 166, 255, .12); }
+.sessions-filters input::placeholder { color: var(--muted); }
+.session-row { display: grid; grid-template-columns: 116px minmax(280px, 2fr) minmax(140px, .8fr) minmax(190px, 1fr) auto; align-items: center; gap: 12px; padding: 9px 11px; }
+.session-row.provider-claude { box-shadow: inset 3px 0 0 var(--claude); }
+.session-row.provider-codex { box-shadow: inset 3px 0 0 var(--codex); }
+.session-row-status { display: flex; align-items: center; gap: 6px; }
+.session-row-account, .session-row-activity { gap: 2px; }
+.session-row-activity .session-id { margin-top: 1px; }
+.session-branch { margin-left: 5px; padding: 1px 5px; border-radius: 4px; background: #21262d; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.session-copy { min-width: 88px; border: 1px solid #3c4652; border-radius: 6px; background: transparent; color: var(--fg); padding: 5px 9px; cursor: pointer; font: inherit; font-size: 11px; }
+.session-copy:hover { background: rgba(127, 127, 127, .15); border-color: #596574; }
+.session-copy:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+.session-copy-placeholder { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 1050px) {
+  .session-window { grid-template-columns: minmax(260px, 2fr) minmax(130px, .8fr) auto; }
+  .session-window-meta { grid-column: 1 / 3; }
+  .session-window-action { grid-column: 3; grid-row: 1 / 3; }
+  .session-row { grid-template-columns: 106px minmax(260px, 2fr) minmax(150px, 1fr) auto; }
+  .session-row-account { display: none; }
+}
+
+@media (max-width: 700px) {
+  header { align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+  header .updated { margin-left: 0; }
+  header .summary { order: 3; width: 100%; }
+  .tabs { margin: 0; }
+  .sessions-page { padding: 14px 12px 22px; }
+  .sessions-section-head { align-items: flex-start; }
+  .sessions-filters { grid-template-columns: 1fr 1fr; }
+  .sessions-search { grid-column: 1 / -1; }
+  .session-window, .session-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; padding: 10px 11px; }
+  .session-window-main, .session-row-main { flex: 1 1 100%; }
+  .session-window-context, .session-row-account, .session-row-activity { display: flex; flex: 1 1 160px; }
+  .session-window-meta { display: flex; flex: 1 1 100%; flex-wrap: wrap; }
+  .session-window-action, .session-row-action { margin-left: auto; }
+  .session-row-status { order: -1; flex: 1 1 100%; }
+}
