@@ -6,9 +6,11 @@ This file guides Claude Code when working in this repository. Preserve any surro
 
 `subtrack` is an always-on local dashboard with three implemented surfaces:
 
-- **Usage** shows live five-hour and weekly limits for multiple Claude and Codex accounts, plus Grok (SuperGrok) two-hour model windows.
+- **Usage** shows live five-hour and weekly limits for multiple Claude and Codex accounts, plus Grok (SuperGrok) two-hour model windows and its weekly SuperGrok allowance.
 - **Sessions** reads existing local Claude/Codex session metadata and, on Windows, correlates live Claude processes with accounts, projects, working directories, and resume commands.
 - **Services** shows a live Windows Task Scheduler, listener, and selected-process snapshot with explicit task actions.
+
+The browser tab bar shows **Usage**, **Commands** (a static cheat sheet in `web/commands.js`; no API) and **Conveyor** (`/api/conveyor` serves `~/.autopase-conveyor-status.json` as-is). The Sessions and Services pages stay served at `/sessions.html` and `/services.html` but are not linked from the tab bar. The UI is English-only.
 
 Usage and Services response snapshots are process-local and live-only. Sessions reads provider-owned history already on disk but keeps only metadata caches of its own; it does not persist transcripts, prompts, messages, tool output, command lines, or environments. There is no subtrack usage/session history database, trends database, Projects/Cleanup view, or interactive-window watchdog. Configuration, provider-owned session stores, credential files, the Services manifest, and daemon logs do persist locally. Historical specs under `docs/superpowers/` are context, not promises. Current behavior is canonical in [Architecture](docs/architecture.md) and [HTTP API](docs/api.md).
 
@@ -53,7 +55,7 @@ Poller -> injected makeFetchUsage() result -> provider adapter/auth
 - `src/types.ts` owns `NormalizedUsage`: `session`, `weekly`, Claude-only `weeklyOpus`, Claude-only `fable`, independent `fableAccess`, `status`, `lastUpdated`, `error`, and `retryAt`. Preserve unknown `resetsAt` as `null`; never fake epoch zero.
 - Provider identifiers, modules, and owned homes are lowercase: `claude` / `codex` / `grok`, `src/auth/<provider>.ts`, and `~/.subtrack/<provider>-homes`.
 - `SnapshotStore` is a process-local, last-value-wins mutable map with no history, persistence, TTL, eviction, or defensive object copying.
-- Polls start seven seconds apart. Normal defaults are Claude 180 seconds, Codex and Grok 60 seconds. `throttled` backs off 5, 10, then 15 minutes; `auth_error` pauses 15 minutes; `stale` and `error` use normal TTL.
+- Polls start seven seconds apart. Normal defaults are Claude 180 seconds, Codex and Grok 60 seconds. `throttled` backs off 5, 10, then 15 minutes, or until the provider's `Retry-After` when that is later (capped at 60 minutes); `auth_error` pauses 15 minutes; `stale` and `error` use normal TTL.
 - Every non-`ok` attempt carries prior `session`, `weekly`, `weeklyOpus`, `fable`, and `fableAccess` forward but keeps the current attempt's status, diagnostics, and retry metadata.
 - `src/thresholds.ts` is the severity policy: `warn` starts at 70 percent and `crit` at 90 percent. The server enriches windows; do not move policy into the UI.
 - Provider usage endpoints are unofficial observed contracts. Treat verified headers, form encoding, response shapes, and retry behavior as load-bearing.
@@ -66,7 +68,7 @@ Anthropic refresh tokens are single-use, so Claude credentials must have one ref
 - `readonly` represents an external Claude CLI home or static setup-token. Its source rereads on every poll, has no refresh/write path, and returns `stale` for known expiry before calling usage.
 - Codex uses isolated `CODEX_HOME=~/.subtrack/codex-homes/<id>` and rereads `<CODEX_HOME>/auth.json`; subtrack has no Codex refresh or persistence path. Recover 401 with `codex login` for that home.
 - Codex onboarding verifies `auth.json` before registration. Re-running the same `add-account` command repairs an existing Codex entry whose login is absent; a cancelled login must not create another broken card.
-- Grok has no CLI or refresh flow: the credential is the browser Cookie header pasted by the operator into `~/.subtrack/grok-homes/<id>/cookie.txt` (readonly by construction, reread every poll). Onboarding probes the live `grok.com/rest/rate-limits` endpoint before registering; the tracked window is grok-4 DEFAULT (2 h), `resetsAt` is anchored only from an exhausted window's `waitTimeSeconds`, and `weekly` is currently always null.
+- Grok has no CLI or refresh flow: the credential is the browser Cookie header pasted by the operator into `~/.subtrack/grok-homes/<id>/cookie.txt` (readonly by construction, reread every poll). Onboarding probes the live `grok.com/rest/rate-limits` endpoint before registering; the tracked session window is grok-4 DEFAULT (2 h), and its `resetsAt` is anchored only from an exhausted window's `waitTimeSeconds`. `weekly` comes from a second, advisory call: the gRPC-Web service `grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` (the "Weekly SuperGrok Heavy Limit" shown in grok.com Settings, which also covers the `grok` CLI as the "Grok Build" product). It must be gRPC-Web framed — Connect/JSON is refused with grpc-status 13. Any failure there leaves `weekly` null and never changes the card's status.
 - `src/secrets.ts` is a tested Windows Credential Manager wrapper but is not on the live adapter path. Do not claim keyring or DPAPI protection for provider credential JSON.
 
 ## Sessions invariants
@@ -110,7 +112,7 @@ PowerShell snapshot -> load/seed services.json -> probe -> sort/untracked
 
 The committed daemon checks `/api/health`, owns `~/.subtrack/daemon.lock`, supervises `serve --no-open`, rotates its log at daemon startup when it is already above 5 MiB, and uses 2-to-60-second crash backoff. In committed `HEAD`, any live lock PID makes a second daemon stand down.
 
-This checkout currently has an uncommitted user diff that instead permits takeover when health is down and a live-PID lock is at least 30 seconds old. Preserve it, but do not treat it as released or proven-safe behavior: it does not terminate the old owner, can create overlapping supervisors or port conflicts, and an old cleanup path can remove a newer lock. A still-live wedged child is not continuously health-checked. See [Operations](docs/operations.md) before changing lock or recovery behavior.
+A variant that permits takeover when health is down and a live-PID lock is at least 30 seconds old has been trialled but is not released or proven safe: it does not terminate the old owner, can create overlapping supervisors or port conflicts, and an old cleanup path can remove a newer lock. A still-live wedged child is not continuously health-checked. See [Operations](docs/operations.md) before changing lock or recovery behavior.
 
 Do not simplify these Windows-specific choices:
 

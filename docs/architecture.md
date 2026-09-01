@@ -50,7 +50,7 @@ The Poller owns scheduling and resilience; adapters own network calls and normal
 | `accountId`, `label` | Stable configuration identity and display label. Callers must keep the store key equal to `accountId` and keep account IDs unique. |
 | `provider` | `claude`, `codex`, or `grok`. |
 | `session` | Approximately five-hour window for Claude/Codex; for Grok this slot carries the grok-4 two-hour allowance. `null` when unknown. |
-| `weekly` | Approximately seven-day window, or `null`. Always `null` for Grok until its weekly endpoint is wired. |
+| `weekly` | Approximately seven-day window, or `null`. For Grok this is the weekly SuperGrok allowance from the advisory `GetGrokCreditsConfig` gRPC-Web call; `null` whenever that call fails. |
 | `weeklyOpus` | Claude-only Opus weekly window, or `null`. |
 | `fable` | Claude-only Fable weekly window, or `null`. |
 | `fableAccess` | Whether Claude returned a Fable limit entry. This is independent of `fable`: `true` with a null window means access is known but the window was malformed or absent. Codex reports `false`. |
@@ -78,7 +78,7 @@ Normal provider TTLs come from configuration (defaults: Claude 180 seconds, Code
 | Status | Next attempt | Backoff state | Last-known fields carried forward |
 | --- | --- | --- | --- |
 | `ok` | Provider TTL | Reset | No |
-| `throttled` | 5, then 10, then 15 minutes; 15 minutes thereafter | Increment | All four windows and `fableAccess` |
+| `throttled` | 5, then 10, then 15 minutes (15 thereafter), or the provider's `Retry-After` when later, capped at 60 minutes | Increment | All four windows and `fableAccess` |
 | `auth_error` | 15 minutes | Reset | All four windows and `fableAccess` |
 | `stale` | Provider TTL | Reset | All four windows and `fableAccess` |
 | `error` | Provider TTL | Reset | All four windows and `fableAccess` |

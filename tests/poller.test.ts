@@ -116,3 +116,40 @@ test('tick() does not run concurrently with itself (in-flight guard)', async () 
   await first;
   assert.equal(calls, 1);      // still only one fetch after first tick resolves
 });
+
+// The provider's own Retry-After wins over the 5/10/15 ladder when it asks for longer: hitting a
+// rate-limited endpoint early only re-hits a closed door and can extend the block.
+test('throttled honours a provider Retry-After longer than the ladder step', async () => {
+  const store = new SnapshotStore();
+  let clock = 0;
+  const p = new Poller({
+    config: { ...config, accounts: [accounts[0]!] }, store, clock: () => clock,
+    fetchUsage: async (a) => ({ ...throttled(a.id), retryAt: new Date(33 * 60_000).toISOString() }),
+  });
+  await p.tick(0);
+  assert.equal(store.get('c1')?.retryAt, new Date(33 * 60_000).toISOString());
+  clock = 32 * 60_000;
+  assert.deepEqual(p.due(clock).map((a) => a.id), []);
+  clock = 33 * 60_000 + 1;
+  assert.deepEqual(p.due(clock).map((a) => a.id), ['c1']);
+});
+
+test('throttled keeps the ladder step when Retry-After is shorter, and caps a wild one at an hour', async () => {
+  const store = new SnapshotStore();
+  let asked = 60_000;                                  // one minute — shorter than the 5min step
+  const p1 = new Poller({
+    config: { ...config, accounts: [accounts[0]!] }, store, clock: () => 0,
+    fetchUsage: async (a) => ({ ...throttled(a.id), retryAt: new Date(asked).toISOString() }),
+  });
+  await p1.tick(0);
+  assert.equal(store.get('c1')?.retryAt, new Date(5 * 60_000).toISOString());
+
+  asked = 9 * 60 * 60_000;                             // nine hours — a card must not go dark that long
+  const store2 = new SnapshotStore();
+  const p2 = new Poller({
+    config: { ...config, accounts: [accounts[0]!] }, store: store2, clock: () => 0,
+    fetchUsage: async (a) => ({ ...throttled(a.id), retryAt: new Date(asked).toISOString() }),
+  });
+  await p2.tick(0);
+  assert.equal(store2.get('c1')?.retryAt, new Date(60 * 60_000).toISOString());
+});

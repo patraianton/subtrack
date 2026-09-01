@@ -1,12 +1,14 @@
 # subtrack
 
-`subtrack` is a local, Windows-first dashboard for monitoring multiple Claude and Codex subscriptions, finding the work sessions behind many open windows, and inspecting supporting local jobs.
+`subtrack` is a local, Windows-first dashboard for people who run several Claude, Codex and Grok subscriptions at once. It shows how much of every five-hour and weekly limit is left, keeps a cheat sheet of the commands you use to drive those accounts, and gives a long-running local job a place on the screen.
 
-It has three views:
+The tab bar has three views:
 
-- **Usage** shows the current 5-hour session and 7-day limits for every enabled account, plus Claude-only Opus and Fable windows when the provider reports them.
-- **Sessions** shows existing local Claude and Codex work sessions by account, project, exact working directory, title, ID, and activity, plus live Claude windows when Windows process metadata can be correlated. Resume buttons copy a PowerShell command; they do not launch or mutate a session.
-- **Services** is a local Ops Cockpit for configured Windows Scheduled Tasks, processes, ports, and HTTP health checks. When `~/.subtrack/hermes.json` is present, it also shows the always-on Hermes fleet/auth monitor and its safe auto-heal state.
+- **Usage** shows the current 5-hour session and 7-day limits for every enabled account, plus Claude-only Opus and Fable windows when the provider reports them. Cards are grouped by provider and sorted by the nearest weekly reset. A rate-limited account waits exactly as long as the provider's `Retry-After` asks and says so on the card, keeping the last real numbers visible.
+- **Commands** is a searchable cheat sheet of the shell commands behind the panel: the subtrack CLI out of the box, plus whatever launcher verbs you add to `web/commands.js`. Click a row to copy it; the "quiz me" switch hides the explanations so you can drill them.
+- **Conveyor** renders `~/.autopase-conveyor-status.json`, a small JSON status file an external pipeline can write (task, phase, timeline, links), so a long-running local job is visible next to the limits it burns.
+
+Two more pages are served but kept out of the tab bar: `/sessions.html` lists existing local Claude and Codex work sessions by account, project, working directory, title, ID and activity, with live Claude windows correlated on Windows (resume buttons copy a PowerShell command; they never launch or mutate a session), and `/services.html` is a local Ops Cockpit for configured Windows Scheduled Tasks, processes, ports and HTTP health checks, showing the always-on Hermes fleet/auth monitor when `~/.subtrack/hermes.json` is present.
 
 ## Boundaries
 

@@ -22,6 +22,7 @@ For system ownership and data flow, see [Architecture](architecture.md). Service
 | Method | Path | Success body | State change |
 | --- | --- | --- | --- |
 | `GET` by convention | `/api/health` | `HealthResponse` | No |
+| `GET` by convention | `/api/conveyor` | `ConveyorStatus` (pass-through) | No |
 | `GET` by convention | `/api/usage` | `UsageResponse` | No |
 | `GET` | `/api/sessions` | `SessionsResponse` | No |
 | `GET` by convention | `/api/services` | `ServicesResponse` | No, except first request can seed `services.json` |
@@ -64,6 +65,10 @@ interface HealthResponse {
 ```
 
 This is a process/HTTP routing check only. It does not verify provider connectivity, poll freshness, credential validity, Sessions-store/window inspection, Services snapshot acquisition, the daemon, or the Scheduled Task.
+
+## `GET /api/conveyor`
+
+Returns the contents of `~/.autopase-conveyor-status.json` verbatim with `Cache-Control: no-store`. The file is written by an external pipeline; subtrack does not validate it. When the file is missing or unparsable the route answers `200` with `{"project":null,"task":null,"timeline":[]}`, which the Conveyor tab renders as "no active task". The fields the tab reads are `project`, `task`, `phase`, `status` (`ok` | `warn` | `err` | `info`), `next`, `pulse` (`{at, text}`), `links` (name to URL), `timeline` (`{ts, level, text}[]`, newest rendered first) and `updatedAt`.
 
 ## `GET /api/usage`
 
@@ -139,7 +144,7 @@ Example shape:
 
 - `session`, `weekly`, `weeklyOpus`, and `fable` are independent nullable windows.
 - `fableAccess` is independent of `fable`. `true` plus `fable: null` means a Claude Fable entry existed but did not yield a valid numeric window. Codex and Grok always report `false` and `null`.
-- For Grok, `session` is the grok-4 DEFAULT two-hour rolling window (`remainingQueries`/`totalQueries` as a percent). Its `resetsAt` is null while queries remain — the endpoint anchors a wait time only when the window is exhausted. `weekly` is currently always null for Grok.
+- For Grok, `session` is the grok-4 DEFAULT two-hour rolling window (`remainingQueries`/`totalQueries` as a percent). Its `resetsAt` is null while queries remain — the endpoint anchors a wait time only when the window is exhausted. `weekly` is the weekly SuperGrok allowance (`credit_usage_percent` and the current period end from the gRPC-Web call `grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig`), which also counts the `grok` CLI's spend. That call is advisory: when it fails, `weekly` is null and `status` stays whatever the session call reported.
 - `lastUpdated` is the current polling attempt timestamp. On a non-`ok` attempt, the Poller carries forward prior windows and `fableAccess`, so the windows can be older than `lastUpdated`.
 - `retryAt` is set by the Poller for `throttled` and `auth_error`. `stale` and generic `error` retry on the normal provider TTL and normally have `null` here.
 - A fresh process returns an empty `accounts` array until enabled accounts complete their first staggered attempts.

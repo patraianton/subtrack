@@ -1,6 +1,6 @@
 import type { AccountConfig, NormalizedUsage, UsageWindow } from '../types.ts';
 import { baseUsage } from './shell.ts';
-import { fetchWithRetry } from './http.ts';
+import { fetchWithRetry, retryAfterAt } from './http.ts';
 
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const SESSION_SECONDS = 18_000;   // 5-hour window  (verified live, Task 9 spike)
@@ -83,7 +83,8 @@ export async function fetchCodexUsage(account: AccountConfig, deps: CodexFetchDe
         : { ...shell, status: 'auth_error', error: `Codex token expired — run: codex login (CODEX_HOME=${account.credentialsHome})` };
     }
     if (res.status === 429) {
-      return { ...shell, status: 'throttled', error: 'Rate limited (HTTP 429)' };
+      const at = retryAfterAt(res, now.getTime());
+      return { ...shell, status: 'throttled', error: 'Rate limited (HTTP 429)', retryAt: at ? new Date(at).toISOString() : null };
     }
     if (!res.ok) {
       return { ...shell, status: 'error', error: `HTTP ${res.status}` };

@@ -242,7 +242,7 @@ The Usage tab reads the server's current in-memory snapshot. Refreshing the brow
 Each account can show:
 
 - `session`: approximately five hours (on a Grok card this gauge is labeled `2h · grok-4` and shows the two-hour grok-4 allowance instead);
-- `weekly`: approximately seven days (a Grok card hides this row while Grok reports no weekly window);
+- `weekly`: approximately seven days (for Grok, the weekly SuperGrok allowance, which includes the `grok` CLI's spend; the row is hidden when that call fails);
 - `weekly · opus`: a Claude-only weekly Opus window when present;
 - `weekly · fable`: a Claude-only Fable window when present.
 
@@ -284,7 +284,7 @@ After normalization, the poller applies these schedules:
 | Status | Meaning | Next scheduled poll | What stays visible |
 |---|---|---|---|
 | `ok` | Current provider request normalized successfully | Normal provider interval | Current windows |
-| `throttled` | Provider returned 429 | 5, then 10, then 15 minutes for consecutive throttles; capped at 15 | Last-known windows, plus retry/error metadata |
+| `throttled` | Provider returned 429 | 5, then 10, then 15 minutes for consecutive throttles (15 thereafter), or the provider's `Retry-After` when it asks for longer, capped at 60 minutes | Last-known windows, plus retry/error metadata |
 | `auth_error` | Credentials are missing, refresh failed, or the provider rejected them (`401`; Claude also maps `403` here) | 15 minutes | Last-known windows and current auth error |
 | `stale` | A read-only Claude file has a known expired access token | Normal provider interval; no provider call or refresh | Last-known windows and stale-credential error |
 | `error` | Transport, parsing, unexpected response, Codex `403`, or other failure | Normal provider interval | Last-known windows and current error |

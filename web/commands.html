@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>subtrack · commands</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>subtrack</h1>
+    <nav class="tabs"><a href="/">Usage</a><a href="/conveyor.html">Conveyor</a><a href="/commands.html" class="active">Commands</a></nav>
+    <span id="cmd-count" class="summary"></span>
+    <span class="updated">source: scripts\claude-accounts\launchers.ps1</span>
+  </header>
+  <main class="cmd-page">
+    <div class="cmd-bar">
+      <input id="cmd-search" type="search" placeholder="Search: cc3, session, limit, subscription…   (press / to focus)" autocomplete="off" spellcheck="false" />
+      <label class="cmd-toggle"><input type="checkbox" id="cmd-quiz" /> quiz me: hide the explanations</label>
+    </div>
+    <div id="cmd-list"></div>
+  </main>
+  <script type="module" src="/commands.js"></script>
+</body>
+</html>

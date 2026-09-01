@@ -39,6 +39,8 @@ h1 { font-size: 18px; margin: 0; }
 .gauge.noaccess { opacity: 0.4; } /* Fable entitlement absent — show the fact, muted, no fill */
 .gauge.noaccess .gauge-top span:last-child { font-style: italic; }
 .err { color: var(--crit); font-size: 12px; margin-top: 6px; }
+/* throttled: the provider asked us to wait — amber, not the red that means "this card needs you" */
+.err.wait { color: var(--warn); }
 .tabs { display: flex; gap: 12px; margin: 0 16px; }
 .tabs a { color: inherit; text-decoration: none; opacity: 0.6; padding: 2px 6px; border-radius: 6px; }
 .tabs a.active { opacity: 1; background: rgba(127,127,127,0.18); }
@@ -131,4 +133,38 @@ h1 { font-size: 18px; margin: 0; }
   .session-window-meta { display: flex; flex: 1 1 100%; flex-wrap: wrap; }
   .session-window-action, .session-row-action { margin-left: auto; }
   .session-row-status { order: -1; flex: 1 1 100%; }
+}
+
+/* Commands tab — a cheat sheet for launchers.ps1 and the panel itself. Pure static page:
+   no requests, no state beyond the search box and the "quiz me" mode. */
+.cmd-page { padding: 16px 20px 32px; display: flex; flex-direction: column; gap: 18px; }
+.cmd-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.cmd-bar input { flex: 1 1 320px; max-width: 520px; height: 34px; border: 1px solid #30363d; border-radius: 6px; outline: none; background: var(--card); color: var(--fg); padding: 0 10px; font: inherit; }
+.cmd-bar input:focus { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88, 166, 255, .12); }
+.cmd-bar input::placeholder { color: var(--muted); }
+.cmd-toggle { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; user-select: none; }
+.cmd-group { min-width: 0; }
+.cmd-group h2 { margin: 0 0 3px; font-size: 15px; }
+.cmd-group.claude h2 { border-left: 3px solid var(--claude); padding-left: 8px; }
+.cmd-group.codex h2 { border-left: 3px solid var(--codex); padding-left: 8px; }
+.cmd-group.grok h2 { border-left: 3px solid var(--grok); padding-left: 8px; }
+.cmd-note { margin: 0 0 9px; color: var(--muted); font-size: 12px; max-width: 900px; }
+.cmd-rows { display: flex; flex-direction: column; gap: 4px; }
+.cmd-row { width: 100%; display: grid; grid-template-columns: minmax(180px, 300px) 1fr auto; align-items: baseline; gap: 14px; padding: 8px 11px; border: 1px solid #21262d; border-radius: 8px; background: var(--card); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cmd-row:hover { border-color: #3c4652; background: #1b222b; }
+.cmd-row:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+.cmd-name { color: var(--fg); font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 600; overflow-wrap: anywhere; }
+.cmd-desc { color: var(--muted); font-size: 12.5px; }
+.cmd-copy { color: var(--muted); font-size: 11px; opacity: 0; white-space: nowrap; }
+.cmd-row:hover .cmd-copy, .cmd-row:focus-visible .cmd-copy { opacity: .8; }
+
+/* "Quiz me": explanations are blurred; only the hovered row is revealed. */
+.cmd-quizmode .cmd-desc { filter: blur(5px); opacity: .55; transition: filter .12s ease; }
+.cmd-quizmode .cmd-row:hover .cmd-desc, .cmd-quizmode .cmd-row:focus-visible .cmd-desc { filter: none; opacity: 1; }
+.cmd-quizmode .cmd-note { filter: blur(4px); }
+.cmd-quizmode .cmd-note:hover { filter: none; }
+
+@media (max-width: 760px) {
+  .cmd-row { grid-template-columns: 1fr; gap: 4px; }
+  .cmd-copy { display: none; }
 }

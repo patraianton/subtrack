@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ClaudeAuth, claudeHomeDir, claudeCredentialsPath, buildClaudeLogin, readClaudeOauth, makeReadOnlyTokenSource, StaleCredentialsError } from '../../src/auth/claude.ts';
+import { ClaudeAuth, claudeHomeDir, claudeCredentialsPath, buildClaudeLogin, readClaudeOauth, makeReadOnlyTokenSource, StaleCredentialsError, ExpiredRefreshTokenError } from '../../src/auth/claude.ts';
 
 async function withHome(fn: (home: string) => Promise<void>) {
   const home = await mkdtemp(join(tmpdir(), 'claude-home-'));
@@ -176,5 +176,52 @@ test('refresh failure surfaces an error', async () => {
     const fetchImpl = (async () => new Response('nope', { status: 400 })) as unknown as typeof fetch;
     const auth = new ClaudeAuth(fetchImpl, () => 1, tmpdir());
     await assert.rejects(() => auth.getAccessToken(home), /refresh failed/i);
+  });
+});
+
+// cc3 went dark on 2026-08-27 with a bare "Claude token refresh failed: HTTP 400" on the card. The
+// body said invalid_grant / "Refresh token expired" — a dead refresh token no retry can revive.
+test('an invalid_grant refresh failure names the cure (new login) instead of a bare HTTP 400', async () => {
+  await withHome(async (home) => {
+    await writeCreds(home, { accessToken: 'old', refreshToken: 'r', expiresAt: 0 });
+    const fetchImpl = (async () => new Response('{"error": "invalid_grant", "error_description": "Refresh token expired"}', { status: 400 })) as unknown as typeof fetch;
+    const auth = new ClaudeAuth(fetchImpl, () => 1, tmpdir());
+    await assert.rejects(() => auth.getAccessToken(home), (e: unknown) => {
+      assert.ok(e instanceof ExpiredRefreshTokenError);
+      assert.match((e as Error).message, /refresh failed/i);           // still classified as auth_error upstream
+      assert.match((e as Error).message, /CLAUDE_CONFIG_DIR|readonly/i); // and says what to do
+      return true;
+    });
+  });
+});
+
+test('other refresh failures carry the status and the server body', async () => {
+  await withHome(async (home) => {
+    await writeCreds(home, { accessToken: 'old', refreshToken: 'r', expiresAt: 0 });
+    const fetchImpl = (async () => new Response('upstream exploded', { status: 503 })) as unknown as typeof fetch;
+    const auth = new ClaudeAuth(fetchImpl, () => 1, tmpdir());
+    await assert.rejects(() => auth.getAccessToken(home), /HTTP 503 - upstream exploded/);
+  });
+});
+
+test('refresh persists the refresh-token expiry the server reports', async () => {
+  await withHome(async (home) => {
+    const clock = 1_000_000;
+    await writeCreds(home, { accessToken: 'old', refreshToken: 'r-old', expiresAt: clock - 1, refreshTokenExpiresAt: clock + 5 });
+    const fetchImpl = (async () => new Response(JSON.stringify({ access_token: 'new', refresh_token: 'r-new', expires_in: 28800, refresh_token_expires_in: 3600 }), { status: 200 })) as unknown as typeof fetch;
+    const auth = new ClaudeAuth(fetchImpl, () => clock, home);
+    await auth.getAccessToken(home);
+    assert.equal((await readClaudeOauth(home))?.refreshTokenExpiresAt, clock + 3600 * 1000);
+  });
+});
+
+test('refresh keeps the known refresh-token expiry when the server omits it', async () => {
+  await withHome(async (home) => {
+    const clock = 1_000_000;
+    await writeCreds(home, { accessToken: 'old', refreshToken: 'r-old', expiresAt: clock - 1, refreshTokenExpiresAt: 42 });
+    const fetchImpl = (async () => new Response(JSON.stringify({ access_token: 'new', expires_in: 28800 }), { status: 200 })) as unknown as typeof fetch;
+    const auth = new ClaudeAuth(fetchImpl, () => clock, home);
+    await auth.getAccessToken(home);
+    assert.equal((await readClaudeOauth(home))?.refreshTokenExpiresAt, 42);
   });
 });

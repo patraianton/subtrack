@@ -4,7 +4,7 @@ import { readFile, mkdir, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeGrokUsage, fetchGrokUsage, fetchGrokEmail } from '../../src/adapters/grok.ts';
+import { normalizeGrokUsage, fetchGrokUsage, fetchGrokEmail, fetchGrokWeekly, parseGrokCredits } from '../../src/adapters/grok.ts';
 import { makeFetchUsage } from '../../src/adapters/index.ts';
 import type { AccountConfig } from '../../src/types.ts';
 
@@ -44,17 +44,76 @@ test('fetchGrokUsage POSTs the tracked model with the stored cookie and normaliz
   const body = await fixture();
   let seen: Headers | undefined;
   let sent = '';
-  const fetchImpl = (async (_url: string, init?: RequestInit) => {
-    seen = new Headers(init?.headers);
-    sent = String(init?.body ?? '');
-    return new Response(JSON.stringify(body), { status: 200 });
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    if (String(url).includes('rate-limits')) {
+      seen = new Headers(init?.headers);
+      sent = String(init?.body ?? '');
+      return new Response(JSON.stringify(body), { status: 200 });
+    }
+    return new Response('', { status: 500 });   // credits call unavailable
   }) as unknown as typeof fetch;
   const deps = { readCookie: async () => 'sso=abc; sso-rw=def', fetchImpl };
   const u = await fetchGrokUsage(ACC, deps, NOW);
   assert.equal(u.session?.utilization, 30);
+  assert.equal(u.weekly, null);                 // a failed credits call must not fail the card
+  assert.equal(u.status, 'ok');
   assert.equal(seen?.get('cookie'), 'sso=abc; sso-rw=def');
   assert.equal(seen?.get('content-type'), 'application/json');
   assert.deepEqual(JSON.parse(sent), { requestKind: 'DEFAULT', modelName: 'grok-4' });
+});
+
+async function creditsFrame() {
+  const p = fileURLToPath(new URL('../fixtures/grok-credits.json', import.meta.url));
+  const raw = JSON.parse(await readFile(p, 'utf8')) as { framedResponseBase64: string };
+  return Buffer.from(raw.framedResponseBase64, 'base64');
+}
+
+test('parseGrokCredits reads the weekly percent and period end from the live gRPC-Web frame', async () => {
+  const w = parseGrokCredits(new Uint8Array(await creditsFrame()));
+  assert.equal(w?.utilization, 3);
+  assert.equal(w?.resetsAt, '2026-08-28T12:24:22.129Z');
+});
+
+test('parseGrokCredits returns null for a body that is not a credits frame', () => {
+  assert.equal(parseGrokCredits(new Uint8Array([1, 2, 3])), null);
+  assert.equal(parseGrokCredits(new Uint8Array(0)), null);
+});
+
+test('fetchGrokWeekly sends an empty gRPC-Web framed request with the cookie', async () => {
+  const frame = await creditsFrame();
+  let seen: Headers | undefined;
+  let sent: Uint8Array | undefined;
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    assert.match(String(url), /GrokBuildBilling\/GetGrokCreditsConfig$/);
+    seen = new Headers(init?.headers);
+    sent = init?.body as Uint8Array;
+    return new Response(frame, { status: 200 });
+  }) as unknown as typeof fetch;
+  const w = await fetchGrokWeekly('sso=abc', fetchImpl);
+  assert.equal(w?.utilization, 3);
+  assert.equal(seen?.get('content-type'), 'application/grpc-web+proto');
+  assert.equal(seen?.get('cookie'), 'sso=abc');
+  assert.deepEqual(Array.from(sent ?? []), [0, 0, 0, 0, 0]);
+});
+
+test('fetchGrokWeekly swallows network and HTTP failures', async () => {
+  const boom = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+  assert.equal(await fetchGrokWeekly('sso=x', boom), null);
+  const http401 = (async () => new Response('', { status: 401 })) as unknown as typeof fetch;
+  assert.equal(await fetchGrokWeekly('sso=x', http401), null);
+});
+
+test('fetchGrokUsage attaches the weekly window when the credits call succeeds', async () => {
+  const body = await fixture();
+  const frame = await creditsFrame();
+  const fetchImpl = (async (url: string) => String(url).includes('rate-limits')
+    ? new Response(JSON.stringify(body), { status: 200 })
+    : new Response(frame, { status: 200 })) as unknown as typeof fetch;
+  const u = await fetchGrokUsage(ACC, { readCookie: async () => 'sso=x', fetchImpl }, NOW);
+  assert.equal(u.status, 'ok');
+  assert.equal(u.session?.utilization, 30);
+  assert.equal(u.weekly?.utilization, 3);
+  assert.equal(u.weekly?.resetsAt, '2026-08-28T12:24:22.129Z');
 });
 
 test('fetchGrokUsage maps 401 to auth_error with re-copy guidance', async () => {

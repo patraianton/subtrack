@@ -36,7 +36,10 @@ function card(u, now) {
   const notes = [];
   if (u.status === 'throttled' && u.retryAt) notes.push(`⏳ retry in ${formatCountdown(u.retryAt, now)}`);
   if (u.status !== 'ok' && u.error) notes.push(u.error);
-  const note = notes.length ? `<div class="err">${esc(notes.join(' · '))}</div>` : '';
+  // A throttled card is waiting, not broken: the numbers above it are the last real ones and the
+  // provider told us when it will answer again. Crit red is for a card that needs a hand (auth).
+  const noteClass = u.status === 'throttled' ? 'err wait' : 'err';
+  const note = notes.length ? `<div class="${noteClass}">${esc(notes.join(' · '))}</div>` : '';
   const ts = u.lastUpdated ? `<span class="cardts">${new Date(u.lastUpdated).toLocaleTimeString()}</span>` : '';
   const stale = isStale(u, now) ? ' stale' : '';
   // Grok's tracked window is the per-model 2-hour allowance, not a 5h session; label it honestly,
@@ -49,7 +52,7 @@ function card(u, now) {
 }
 
 // Group cards by provider (Claude first, then Codex). Within each group the soonest weekly-class
-// reset comes first (Anton 2026-08-08: "с какими работать" — ближайший сброс наверху); accounts
+// reset comes first (Anton 2026-08-08: "which ones can I work with" — nearest reset on top); accounts
 // with no known reset sink to the end of their group. Session resets are ignored here — they
 // cycle every 5h and would reshuffle the grid constantly.
 const PROVIDER_ORDER = { claude: 0, codex: 1, grok: 2 };
