@@ -7,7 +7,7 @@ function esc(s) {
 
 function render(d) {
   if (!d || !d.task) {
-    root.innerHTML = '<div class="cv-empty">Нет активной задачи конвейера — файл статуса пуст.</div>';
+    root.innerHTML = '<div class="cv-empty">No active conveyor task — the status file is empty.</div>';
     return;
   }
   const phase = esc(d.phase ?? '');
@@ -23,12 +23,12 @@ function render(d) {
       <div class="cv-task">${esc(d.project ?? '')}</div>
       <p style="margin:4px 0 10px">${esc(d.task)}</p>
       <span class="cv-phase ${level}">${phase}</span>
-      ${d.next ? `<p class="cv-next">Дальше: ${esc(d.next)}</p>` : ''}
-      ${d.pulse ? `<p style="margin:6px 0 0;font-size:.85rem;opacity:.75">♥ пульс ${esc(d.pulse.at)} — ${esc(d.pulse.text)}</p>` : ''}
+      ${d.next ? `<p class="cv-next">Next: ${esc(d.next)}</p>` : ''}
+      ${d.pulse ? `<p style="margin:6px 0 0;font-size:.85rem;opacity:.75">♥ pulse ${esc(d.pulse.at)} — ${esc(d.pulse.text)}</p>` : ''}
       <div class="cv-links">${links}</div>
     </div>
     <div class="cv-card"><ul class="cv-tl">${rows}</ul></div>`;
-  updated.textContent = d.updatedAt ? `обновлено ${new Date(d.updatedAt).toLocaleTimeString('ru-RU')}` : '';
+  updated.textContent = d.updatedAt ? `updated ${new Date(d.updatedAt).toLocaleTimeString()}` : '';
 }
 
 async function tick() {
@@ -36,7 +36,7 @@ async function tick() {
     const r = await fetch('/api/conveyor', { cache: 'no-store' });
     render(await r.json());
   } catch {
-    root.innerHTML = '<div class="cv-empty">API конвейера недоступен.</div>';
+    root.innerHTML = '<div class="cv-empty">Conveyor API unavailable.</div>';
   }
 }
 
