@@ -7,6 +7,8 @@ import type { AccountConfig, NormalizedUsage } from './types.ts';
 import { loadConfig, saveConfig, addAccount, removeAccount, renameAccount, configDir } from './config.ts';
 import { claudeHomeDir, buildClaudeLogin, readClaudeOauth } from './auth/claude.ts';
 import { codexHomeDir, buildCodexLogin, readCodexAuth } from './auth/codex.ts';
+import { grokHomeDir, grokCookiePath, readGrokCookie, readGrokMeta, writeGrokMeta } from './auth/grok.ts';
+import { fetchGrokUsage, fetchGrokEmail } from './adapters/grok.ts';
 import { makeFetchUsage } from './adapters/index.ts';
 
 /** Spawn an interactive child (stdio inherited) and report whether it exited successfully. */
@@ -72,6 +74,9 @@ async function accountEmail(a: AccountConfig): Promise<string> {
     if (a.provider === 'claude') {
       const cj = JSON.parse(await readFile(join(a.credentialsHome, '.claude.json'), 'utf8')) as { oauthAccount?: { emailAddress?: string } };
       return cj.oauthAccount?.emailAddress ?? '';
+    }
+    if (a.provider === 'grok') {
+      return (await readGrokMeta(a.credentialsHome)).email ?? '';
     }
     const auth = JSON.parse(await readFile(join(a.credentialsHome, 'auth.json'), 'utf8')) as { tokens?: { id_token?: string } };
     const idToken = auth.tokens?.id_token;
@@ -221,12 +226,58 @@ export async function registerCodexAccount(
   return 0;
 }
 
+/**
+ * Register a SuperGrok account. grok.com has no CLI login: the only credential is the browser
+ * session cookie, pasted once into <home>/cookie.txt by the user. Registration probes the live
+ * rate-limits endpoint first, so a bad paste cannot create a permanently-red card; re-running
+ * the same add-account command after fixing the file completes it (mirrors Codex onboarding).
+ */
+export async function registerGrokAccount(base: string, id: string, labelFlag?: string, fetchImpl?: typeof fetch): Promise<number> {
+  const cfg = await loadConfig(base);
+  if (cfg.accounts.some((a) => a.id === id)) {
+    console.error(`Account "${id}" already exists — run \`remove-account ${id}\` first to redo it.`);
+    return 2;
+  }
+  const home = grokHomeDir(configDir(base), id);
+  await mkdir(home, { recursive: true });
+  let cookie: string;
+  try {
+    cookie = await readGrokCookie(home);
+  } catch {
+    console.error('No Grok cookie yet. In a logged-in grok.com browser tab:');
+    console.error('  F12 → Network → refresh → click any grok.com request → Request Headers → copy the "cookie" value.');
+    console.error(`Paste it into: ${grokCookiePath(home)}`);
+    console.error('Then re-run this same add-account command.');
+    return 2;
+  }
+  const acc: AccountConfig = { id, label: labelFlag ?? id, provider: 'grok', enabled: true, credentialsHome: home, credentialsMode: 'readonly' };
+  // Live probe: register only a verified cookie. `throttled` still proves auth passed; anything
+  // else (rejection, challenge page, unexpected body, network down) refuses so a bad paste can
+  // never create a permanently-red card — fixing the file and re-running completes it.
+  const probe = await fetchGrokUsage(acc, { readCookie: () => Promise.resolve(cookie), fetchImpl });
+  if (probe.status !== 'ok' && probe.status !== 'throttled') {
+    console.error(`Grok probe failed (${probe.error ?? probe.status}). Re-copy the cookie from the browser (or retry if this was a network blip) and re-run.`);
+    return 2;
+  }
+  // account.json captures the email once, at registration; it is never refreshed (no write path
+  // into the home afterwards). If a different account's cookie is later pasted into cookie.txt,
+  // `list` keeps showing this email — redo remove-account/add-account to update it.
+  const email = await fetchGrokEmail(cookie, fetchImpl);
+  if (email) {
+    await writeGrokMeta(home, { email });
+    if (!labelFlag) acc.label = email;
+  }
+  await saveConfig(addAccount(cfg, acc), base);
+  console.log(`Added Grok account ${id} (${acc.label}) — cookie is read from ${grokCookiePath(home)} each poll; when it expires, re-copy it there.`);
+  return 0;
+}
+
 async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
   const id = args.positionals[0];
   const provider = args.flags.provider;
   const labelFlag = typeof args.flags.label === 'string' ? args.flags.label : undefined;
-  if (!id || (provider !== 'claude' && provider !== 'codex')) {
-    console.error('Usage: subtrack add-account <id> --provider claude|codex [--label "..."] [--readonly-home <dir>] [--static-token]');
+  if (!id || (provider !== 'claude' && provider !== 'codex' && provider !== 'grok')) {
+    console.error('Usage: subtrack add-account <id> --provider claude|codex|grok [--label "..."] [--readonly-home <dir>] [--static-token]');
     return 2;
   }
   const readonlyHome = typeof args.flags['readonly-home'] === 'string' ? args.flags['readonly-home'] : undefined;
@@ -236,6 +287,7 @@ async function cmdAddAccount(base: string, args: ParsedArgs): Promise<number> {
     return 2;
   }
   if (provider === 'codex') return registerCodexAccount(base, id, labelFlag);
+  if (provider === 'grok') return registerGrokAccount(base, id, labelFlag);
   const cfg = await loadConfig(base);
   if (cfg.accounts.some((a) => a.id === id)) {
     console.error(`Account "${id}" already exists — run \`remove-account ${id}\` first to redo it.`);
@@ -295,7 +347,7 @@ export async function main(argv: string[], base: string = homedir()): Promise<nu
       case 'status': { const { daemonStatus } = await import('./install.ts'); return await daemonStatus(base); }
       case 'logs': { const { showLogs } = await import('./install.ts'); return await showLogs(base, Number(args.flags.lines) || 40); }
       default:
-        console.log('Commands: serve | check | list | add-account <id> --provider claude|codex | rename <id> "<name>" | remove-account <id>\n         install | uninstall | start | stop | status | logs   (always-on background dashboard)');
+        console.log('Commands: serve | check | list | add-account <id> --provider claude|codex|grok | rename <id> "<name>" | remove-account <id>\n         install | uninstall | start | stop | status | logs   (always-on background dashboard)');
         return args.cmd ? 1 : 0;
     }
   } catch (e) {
