@@ -62,5 +62,6 @@ test('loadConfig deep-merges partial pollIntervalSeconds, preserving defaults fo
     const cfg = await loadConfig(base);
     assert.equal(cfg.pollIntervalSeconds.claude, 300);
     assert.equal(cfg.pollIntervalSeconds.codex, 60);
+    assert.equal(cfg.pollIntervalSeconds.grok, 60); // filled in for configs written before the provider existed
   });
 });

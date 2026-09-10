@@ -12,7 +12,7 @@ async function withServer(
   const app = createApp(new SnapshotStore(), {
     webDir: process.cwd(),
     uiRefreshSeconds: 30,
-    pollIntervalSeconds: { claude: 180, codex: 60 },
+    pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 },
     getSessions,
   });
   app.listen(0, '127.0.0.1');

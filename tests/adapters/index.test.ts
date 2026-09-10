@@ -71,7 +71,7 @@ test('incident regression: poller over a readonly account never hits the token e
     await writeCreds(home, { accessToken: 'rejected', refreshToken: 'cli-owned-single-use', expiresAt: clock + 60 * 60_000 });
     const before = await readFile(claudeCredentialsPath(home), 'utf8');
     const urls: string[] = [];
-    const config: SubtrackConfig = { version: 1, port: 0, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 }, accounts: [roAccount(home)] };
+    const config: SubtrackConfig = { version: 1, port: 0, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 }, accounts: [roAccount(home)] };
     const store = new SnapshotStore();
     const fetchUsage = makeFetchUsage({ fetchImpl: recordingFetch(urls, 401), clock: () => clock });
     const poller = new Poller({ config, fetchUsage, store, clock: () => clock });
@@ -88,7 +88,7 @@ test('poller retries a stale readonly account at the normal TTL and recovers onc
     let clock = 1_000_000;
     await writeCreds(home, { accessToken: 'expired', expiresAt: clock - 1 });
     const urls: string[] = [];
-    const config: SubtrackConfig = { version: 1, port: 0, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 }, accounts: [roAccount(home)] };
+    const config: SubtrackConfig = { version: 1, port: 0, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 }, accounts: [roAccount(home)] };
     const store = new SnapshotStore();
     const fetchUsage = makeFetchUsage({ fetchImpl: recordingFetch(urls), clock: () => clock });
     const poller = new Poller({ config, fetchUsage, store, clock: () => clock });

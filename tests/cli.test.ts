@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { parseArgs, formatCheckTable, main, registerCodexAccount, registerStaticTokenAccount } from '../src/cli.ts';
+import { parseArgs, formatCheckTable, main, registerCodexAccount, registerGrokAccount, registerStaticTokenAccount } from '../src/cli.ts';
 import { loadConfig, saveConfig } from '../src/config.ts';
 import type { NormalizedUsage, SubtrackConfig } from '../src/types.ts';
 
@@ -152,7 +152,7 @@ test('re-running add-account repairs an existing Codex account with missing auth
       version: 1,
       port: 7777,
       uiRefreshSeconds: 30,
-      pollIntervalSeconds: { claude: 180, codex: 60 },
+      pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 },
       accounts: [{ id: 'codex-1', label: 'Keep this label', provider: 'codex', enabled: true, credentialsHome: home }],
     }, base);
     let runs = 0;
@@ -177,7 +177,7 @@ test('re-running add-account can refresh an existing Codex login', async () => {
       version: 1,
       port: 7777,
       uiRefreshSeconds: 30,
-      pollIntervalSeconds: { claude: 180, codex: 60 },
+      pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 },
       accounts: [{ id: 'codex-1', label: 'Healthy', provider: 'codex', enabled: true, credentialsHome: home }],
     }, base);
     let runs = 0;
@@ -197,7 +197,7 @@ test('cancelled repair keeps the existing Codex account without claiming success
       version: 1,
       port: 7777,
       uiRefreshSeconds: 30,
-      pollIntervalSeconds: { claude: 180, codex: 60 },
+      pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 },
       accounts: [{ id: 'codex-1', label: 'Still here', provider: 'codex', enabled: true, credentialsHome: home }],
     }, base);
 
@@ -215,7 +215,7 @@ test('add-account refuses to run codex login inside an externally-owned readonly
       version: 1,
       port: 7777,
       uiRefreshSeconds: 30,
-      pollIntervalSeconds: { claude: 180, codex: 60 },
+      pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 },
       accounts: [{ id: 'codex-shared', label: 'Shared', provider: 'codex', enabled: true, credentialsHome: home, credentialsMode: 'readonly' }],
     }, base);
     let runs = 0;
@@ -238,4 +238,56 @@ test('main resolves to exit 1 (never an unhandled rejection) when accounts.json 
     console.error = origError;
     await rm(base, { recursive: true, force: true });
   }
+});
+
+test('add-account grok without a cookie file prints paste instructions and registers nothing', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const code = await silenced(() => main(['add-account', 'grok-1', '--provider', 'grok'], base));
+    assert.equal(code, 2);
+    assert.equal((await loadConfig(base)).accounts.length, 0);
+  });
+});
+
+test('registerGrokAccount probes the cookie, labels from get-user email, and registers readonly', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const home = join(base, '.subtrack', 'grok-homes', 'grok-1');
+    await mkdir(home, { recursive: true });
+    await writeFile(join(home, 'cookie.txt'), 'sso=abc', 'utf8');
+    const fetchImpl = (async (url: string) => String(url).includes('get-user')
+      ? new Response(JSON.stringify({ email: 'tools@example.com' }), { status: 200 })
+      : new Response(JSON.stringify({ windowSizeSeconds: 7200, remainingQueries: 90, totalQueries: 90 }), { status: 200 })
+    ) as unknown as typeof fetch;
+    const code = await silenced(() => registerGrokAccount(base, 'grok-1', undefined, fetchImpl));
+    assert.equal(code, 0);
+    const acc = (await readCfg(base)).accounts.find((a) => a.id === 'grok-1');
+    assert.equal(acc?.provider, 'grok');
+    assert.equal(acc?.credentialsMode, 'readonly');
+    assert.equal(acc?.credentialsHome, home);
+    assert.equal(acc?.label, 'tools@example.com');
+  });
+});
+
+test('registerGrokAccount refuses an unverified probe (non-rate-limits 200 body) and registers nothing', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const home = join(base, '.subtrack', 'grok-homes', 'grok-1');
+    await mkdir(home, { recursive: true });
+    await writeFile(join(home, 'cookie.txt'), 'sso=abc', 'utf8');
+    // e.g. an HTML interstitial served with HTTP 200 — normalizes to status 'error', not auth_error
+    const fetchImpl = (async () => new Response('<html>challenge</html>', { status: 200 })) as unknown as typeof fetch;
+    const code = await silenced(() => registerGrokAccount(base, 'grok-1', undefined, fetchImpl));
+    assert.equal(code, 2);
+    assert.equal((await loadConfig(base)).accounts.length, 0);
+  });
+});
+
+test('registerGrokAccount refuses a rejected cookie and registers nothing', async () => {
+  await withTmp('subtrack-cli-', async (base) => {
+    const home = join(base, '.subtrack', 'grok-homes', 'grok-1');
+    await mkdir(home, { recursive: true });
+    await writeFile(join(home, 'cookie.txt'), 'sso=stale', 'utf8');
+    const fetchImpl = (async () => new Response('', { status: 401 })) as unknown as typeof fetch;
+    const code = await silenced(() => registerGrokAccount(base, 'grok-1', undefined, fetchImpl));
+    assert.equal(code, 2);
+    assert.equal((await loadConfig(base)).accounts.length, 0);
+  });
 });

@@ -7,7 +7,7 @@ import { SnapshotStore } from '../src/snapshotStore.ts';
 import type { ServicesResponse, ActionRequest, ActionResult } from '../src/ops/types.ts';
 
 async function withServer(getServices: () => Promise<ServicesResponse>, fn: (base: string) => Promise<void>) {
-  const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 }, getServices });
+  const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 }, getServices });
   app.listen(0, '127.0.0.1');
   await once(app, 'listening');
   const { port } = app.address() as { port: number };
@@ -32,7 +32,7 @@ test('GET /api/services returns 500 when the provider throws', async () => {
 });
 
 test('GET /api/services is 503 when no provider is wired', async () => {
-  const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 } });
+  const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 } });
   app.listen(0, '127.0.0.1');
   await once(app, 'listening');
   const { port } = app.address() as { port: number };
@@ -43,7 +43,7 @@ test('GET /api/services is 503 when no provider is wired', async () => {
 });
 
 async function withActionServer(runServiceAction: (r: ActionRequest) => Promise<ActionResult>, fn: (base: string) => Promise<void>) {
-  const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 }, runServiceAction });
+  const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 }, runServiceAction });
   app.listen(0, '127.0.0.1');
   await once(app, 'listening');
   const { port } = app.address() as { port: number };
@@ -68,7 +68,7 @@ test('POST /api/services/action is 400 on malformed JSON', async () => {
 });
 
 test('POST /api/services/action is 503 when no executor is wired', async () => {
-  const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 } });
+  const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 } });
   app.listen(0, '127.0.0.1');
   await once(app, 'listening');
   const { port } = app.address() as { port: number };

@@ -53,7 +53,7 @@ test('GET /api/usage exposes fableAccess per account (has-access vs no-access)',
 });
 
 async function withServer(store: SnapshotStore, fn: (baseUrl: string) => Promise<void>) {
-  const server = createApp(store, { webDir, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 } });
+  const server = createApp(store, { webDir, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 } });
   await new Promise<void>((r) => server.listen(0, r));
   const addr = server.address();
   const port = typeof addr === 'object' && addr ? addr.port : 0;
@@ -92,7 +92,7 @@ function rawStatus(port: number, path: string): Promise<number> {
 
 test('blocks path traversal outside webDir with 403', async () => {
   const store = new SnapshotStore();
-  const server = createApp(store, { webDir, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 } });
+  const server = createApp(store, { webDir, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 } });
   await new Promise<void>((r) => server.listen(0, r));
   const addr = server.address();
   const port = typeof addr === 'object' && addr ? addr.port : 0;

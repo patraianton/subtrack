@@ -1,4 +1,4 @@
-export type Provider = 'claude' | 'codex';
+export type Provider = 'claude' | 'codex' | 'grok';
 // 'stale' is read-only-credentials-specific: the source file's token is expired and only its owner
 // (e.g. the Claude Code CLI) may refresh it — subtrack must neither refresh nor hammer the API.
 export type UsageStatus = 'ok' | 'throttled' | 'auth_error' | 'stale' | 'error';
@@ -32,7 +32,8 @@ export interface AccountConfig {
   label: string;
   provider: Provider;
   enabled: boolean;
-  credentialsHome?: string; // isolated config dir: claude → CLAUDE_CONFIG_DIR, codex → CODEX_HOME
+  credentialsHome?: string; // isolated config dir: claude → CLAUDE_CONFIG_DIR, codex → CODEX_HOME,
+                            // grok → ~/.subtrack/grok-homes/<id> (cookie.txt copied from the browser)
   // 'owned' (default when absent — pre-existing configs migrate as-is): subtrack created the home
   //   via add-account and is the SOLE owner of its refresh token → may auto-refresh + persist.
   // 'readonly': the home belongs to someone else (a live Claude Code CLI/Hermes dir) or holds a
@@ -45,6 +46,12 @@ export interface SubtrackConfig {
   version: number;
   port: number;
   uiRefreshSeconds: number;
-  pollIntervalSeconds: { claude: number; codex: number };
+  pollIntervalSeconds: { claude: number; codex: number; grok: number };
   accounts: AccountConfig[];
+  /**
+   * ssh targets that also run Codex under the configured logins, e.g. `["mac", "root@1.2.3.4"]`.
+   * Only the Codex session breakdown uses them, only while a card is expanded, and only to read.
+   * Empty (the default) keeps subtrack strictly local.
+   */
+  codexRemotes?: string[];
 }

@@ -7,8 +7,9 @@ export const DEFAULT_CONFIG: SubtrackConfig = {
   version: 1,
   port: 7777,
   uiRefreshSeconds: 30,
-  pollIntervalSeconds: { claude: 180, codex: 60 },
+  pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 },
   accounts: [],
+  codexRemotes: [],
 };
 
 export function configDir(base: string = homedir()): string {
@@ -23,7 +24,7 @@ export async function loadConfig(base: string = homedir()): Promise<SubtrackConf
   try {
     const raw = await readFile(configPath(base), 'utf8');
     const parsed = JSON.parse(raw) as Partial<SubtrackConfig>;
-    return { ...DEFAULT_CONFIG, ...parsed, pollIntervalSeconds: { ...DEFAULT_CONFIG.pollIntervalSeconds, ...parsed.pollIntervalSeconds }, accounts: parsed.accounts ?? [] };
+    return { ...DEFAULT_CONFIG, ...parsed, pollIntervalSeconds: { ...DEFAULT_CONFIG.pollIntervalSeconds, ...parsed.pollIntervalSeconds }, accounts: parsed.accounts ?? [], codexRemotes: parsed.codexRemotes ?? [] };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ...DEFAULT_CONFIG, pollIntervalSeconds: { ...DEFAULT_CONFIG.pollIntervalSeconds } };
     throw e;

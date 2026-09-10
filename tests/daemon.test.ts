@@ -23,7 +23,7 @@ test('nextBackoff resets to base after a healthy run', () => {
 });
 
 test('checkHealth is true for a live dashboard and false for a dead port', async () => {
-  const server = createApp(new SnapshotStore(), { webDir, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60 } });
+  const server = createApp(new SnapshotStore(), { webDir, uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 } });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const addr = server.address();
   const port = typeof addr === 'object' && addr ? addr.port : 0;
