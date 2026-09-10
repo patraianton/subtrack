@@ -1,7 +1,7 @@
 import type { AccountConfig, NormalizedUsage, UsageWindow } from '../types.ts';
 import { StaleCredentialsError } from '../auth/claude.ts';
 import { baseUsage } from './shell.ts';
-import { fetchWithRetry } from './http.ts';
+import { fetchWithRetry, retryAfterAt } from './http.ts';
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -97,7 +97,8 @@ export async function fetchClaudeUsage(account: AccountConfig, deps: ClaudeFetch
       return { ...shell, status: 'auth_error', error: account.credentialsMode === 'readonly' ? `Token expired/invalid (401) — ${readonlyHint}` : 'Token expired/invalid (401) — re-run add-account with a fresh `claude setup-token`' };
     }
     if (res.status === 429) {
-      return { ...shell, status: 'throttled', error: 'Rate limited (HTTP 429)' };
+      const at = retryAfterAt(res, now.getTime());
+      return { ...shell, status: 'throttled', error: 'Rate limited (HTTP 429)', retryAt: at ? new Date(at).toISOString() : null };
     }
     if (!res.ok) {
       return { ...shell, status: 'error', error: `HTTP ${res.status}` };

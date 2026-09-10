@@ -30,6 +30,24 @@ export function isTransientFetchError(e: unknown): boolean {
 }
 
 /**
+ * `Retry-After` as an absolute epoch-ms instant, or null when the header is absent or unusable.
+ * Accepts both wire forms: delta-seconds ("1961") and an HTTP date.
+ *
+ * Verified 2026-09-01 on a rate-limited Claude account: api.anthropic.com answers
+ * /api/oauth/usage with 429 + `retry-after: 1961` (~33 min) — far longer than our own 5/10/15
+ * ladder. Polling again before that lapses only re-hits a closed door and can extend the block,
+ * so callers pass this through as `retryAt` and the poller honours it.
+ */
+export function retryAfterAt(res: { headers: { get(name: string): string | null } }, now: number = Date.now()): number | null {
+  const raw = res.headers.get('retry-after');
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) return now + Number(trimmed) * 1000;
+  const at = Date.parse(trimmed);
+  return Number.isNaN(at) ? null : at;
+}
+
+/**
  * fetch() that retries transient transport failures and 5xx responses up to `retries` times.
  * 4xx responses (auth, rate-limit) return immediately — retrying those is wrong. When it finally
  * gives up on a transport failure, the thrown error's message carries the cause code, e.g.

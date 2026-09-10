@@ -180,3 +180,18 @@ test('fetchClaudeUsage points 401/403 at the credential source for read-only acc
   assert.match(u.error ?? '', /read-only|source/i);
   assert.doesNotMatch(u.error ?? '', /add-account/);
 });
+
+// A rate-limited account is told when to come back; the card and the poller both need that
+// instant, or the dashboard promises "retry in 3m" for a door that stays shut for half an hour.
+test('fetchClaudeUsage carries the 429 Retry-After through as retryAt', async () => {
+  const fetchImpl = (async () => new Response('slow down', { status: 429, headers: { 'retry-after': '1961' } })) as unknown as typeof fetch;
+  const u = await fetchClaudeUsage(ACC, { getAccessToken: async () => 'tok', fetchImpl }, NOW);
+  assert.equal(u.status, 'throttled');
+  assert.equal(u.retryAt, new Date(NOW.getTime() + 1_961_000).toISOString());
+});
+
+test('fetchClaudeUsage leaves retryAt null when the 429 carries no Retry-After', async () => {
+  const fetchImpl = (async () => new Response('slow down', { status: 429 })) as unknown as typeof fetch;
+  const u = await fetchClaudeUsage(ACC, { getAccessToken: async () => 'tok', fetchImpl }, NOW);
+  assert.equal(u.retryAt, null);
+});
