@@ -4,6 +4,9 @@ import type { SnapshotStore } from './snapshotStore.ts';
 const BACKOFF_MINUTES = [5, 10, 15];
 const STAGGER_MS = 7_000;
 const AUTH_ERROR_PAUSE_MS = 15 * 60_000;
+// Ceiling for a provider-supplied Retry-After: honour a long wait, but never let one header park
+// an account for hours (a card that stops updating all evening is worse than one extra request).
+const MAX_THROTTLE_MS = 60 * 60_000;
 
 export interface PollerDeps {
   config: SubtrackConfig;
@@ -83,7 +86,13 @@ export class Poller {
     if (usage.status === 'throttled') {
       const mins = BACKOFF_MINUTES[Math.min(st.step, BACKOFF_MINUTES.length - 1)]!;
       st.step += 1;
-      st.nextAt = now + mins * 60_000;
+      // The adapter passes the provider's own Retry-After through as retryAt. When the provider
+      // asks for longer than our ladder, it wins: Anthropic answers a rate-limited account with
+      // ~33 minutes, and retrying every 5 just re-hits a closed door (and can extend the block),
+      // while the card sits on a "retry in 3m" countdown that never comes true.
+      const asked = usage.retryAt ? Date.parse(usage.retryAt) : NaN;
+      const askedAt = Number.isFinite(asked) ? Math.min(asked, now + MAX_THROTTLE_MS) : 0;
+      st.nextAt = Math.max(now + mins * 60_000, askedAt);
       usage.retryAt = new Date(st.nextAt).toISOString();
     } else if (usage.status === 'auth_error') {
       st.step = 0;
