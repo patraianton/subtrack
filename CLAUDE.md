@@ -6,9 +6,11 @@ This file guides Claude Code when working in this repository. Preserve any surro
 
 `subtrack` is an always-on local dashboard with three implemented surfaces:
 
-- **Usage** shows live five-hour and weekly limits for multiple Claude and Codex accounts.
+- **Usage** shows live five-hour and weekly limits for multiple Claude and Codex accounts, plus Grok (SuperGrok) two-hour model windows and its weekly SuperGrok allowance. Clicking a Claude `session` bar expands a local, on-demand breakdown of which sessions burned that window.
 - **Sessions** reads existing local Claude/Codex session metadata and, on Windows, correlates live Claude processes with accounts, projects, working directories, and resume commands.
 - **Services** shows a live Windows Task Scheduler, listener, and selected-process snapshot with explicit task actions.
+
+The browser tab bar shows **Usage**, **Commands** (a static cheat sheet in `web/commands.js`; no API) and **Conveyor** (`/api/conveyor` serves `~/.autopase-conveyor-status.json` as-is). The Sessions and Services pages stay served at `/sessions.html` and `/services.html` but are not linked from the tab bar. The UI is English-only.
 
 Usage and Services response snapshots are process-local and live-only. Sessions reads provider-owned history already on disk but keeps only metadata caches of its own; it does not persist transcripts, prompts, messages, tool output, command lines, or environments. There is no subtrack usage/session history database, trends database, Projects/Cleanup view, or interactive-window watchdog. Configuration, provider-owned session stores, credential files, the Services manifest, and daemon logs do persist locally. Historical specs under `docs/superpowers/` are context, not promises. Current behavior is canonical in [Architecture](docs/architecture.md) and [HTTP API](docs/api.md).
 
@@ -26,7 +28,7 @@ npm test
 node --import tsx --test tests/poller.test.ts
 node --import tsx --test --test-name-pattern "backoff" tests/poller.test.ts
 
-npx tsx src/cli.ts add-account <id> --provider claude|codex --label "Name"
+npx tsx src/cli.ts add-account <id> --provider claude|codex|grok --label "Name"
 npx tsx src/cli.ts add-account <id> --provider claude --readonly-home <dir>
 claude setup-token | npx tsx src/cli.ts add-account <id> --provider claude --static-token
 npx tsx src/cli.ts list
@@ -51,9 +53,9 @@ Poller -> injected makeFetchUsage() result -> provider adapter/auth
 ```
 
 - `src/types.ts` owns `NormalizedUsage`: `session`, `weekly`, Claude-only `weeklyOpus`, Claude-only `fable`, independent `fableAccess`, `status`, `lastUpdated`, `error`, and `retryAt`. Preserve unknown `resetsAt` as `null`; never fake epoch zero.
-- Provider identifiers, modules, and owned homes are lowercase: `claude` / `codex`, `src/auth/claude.ts` / `src/auth/codex.ts`, and `~/.subtrack/claude-homes` / `~/.subtrack/codex-homes`.
+- Provider identifiers, modules, and owned homes are lowercase: `claude` / `codex` / `grok`, `src/auth/<provider>.ts`, and `~/.subtrack/<provider>-homes`.
 - `SnapshotStore` is a process-local, last-value-wins mutable map with no history, persistence, TTL, eviction, or defensive object copying.
-- Polls start seven seconds apart. Normal defaults are Claude 180 seconds and Codex 60 seconds. `throttled` backs off 5, 10, then 15 minutes; `auth_error` pauses 15 minutes; `stale` and `error` use normal TTL.
+- Polls start seven seconds apart. Normal defaults are Claude 180 seconds, Codex and Grok 60 seconds. `throttled` backs off 5, 10, then 15 minutes, or until the provider's `Retry-After` when that is later (capped at 60 minutes); `auth_error` pauses 15 minutes; `stale` and `error` use normal TTL.
 - Every non-`ok` attempt carries prior `session`, `weekly`, `weeklyOpus`, `fable`, and `fableAccess` forward but keeps the current attempt's status, diagnostics, and retry metadata.
 - `src/thresholds.ts` is the severity policy: `warn` starts at 70 percent and `crit` at 90 percent. The server enriches windows; do not move policy into the UI.
 - Provider usage endpoints are unofficial observed contracts. Treat verified headers, form encoding, response shapes, and retry behavior as load-bearing.
@@ -66,7 +68,26 @@ Anthropic refresh tokens are single-use, so Claude credentials must have one ref
 - `readonly` represents an external Claude CLI home or static setup-token. Its source rereads on every poll, has no refresh/write path, and returns `stale` for known expiry before calling usage.
 - Codex uses isolated `CODEX_HOME=~/.subtrack/codex-homes/<id>` and rereads `<CODEX_HOME>/auth.json`; subtrack has no Codex refresh or persistence path. Recover 401 with `codex login` for that home.
 - Codex onboarding verifies `auth.json` before registration. Re-running the same `add-account` command repairs an existing Codex entry whose login is absent; a cancelled login must not create another broken card.
+- Grok has no CLI or refresh flow: the credential is the browser Cookie header pasted by the operator into `~/.subtrack/grok-homes/<id>/cookie.txt` (readonly by construction, reread every poll). Onboarding probes the live `grok.com/rest/rate-limits` endpoint before registering; the tracked session window is grok-4 DEFAULT (2 h), and its `resetsAt` is anchored only from an exhausted window's `waitTimeSeconds`. `weekly` comes from a second, advisory call: the gRPC-Web service `grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` (the "Weekly SuperGrok Heavy Limit" shown in grok.com Settings, which also covers the `grok` CLI as the "Grok Build" product). It must be gRPC-Web framed — Connect/JSON is refused with grpc-status 13. Any failure there leaves `weekly` null and never changes the card's status.
 - `src/secrets.ts` is a tested Windows Credential Manager wrapper but is not on the live adapter path. Do not claim keyring or DPAPI protection for provider credential JSON.
+
+## Burn invariants (who ate the session window)
+
+```text
+SnapshotStore resetsAt -> window -> ownership (Claude: per-home session-env/history.jsonl;
+   Codex: auth.json account id -> per-home rollout store)
+   -> window-active session files -> tail read + usage sums -> 30 s cache -> /api/burn -> web/burn.js
+```
+
+- Numbers are a local estimate, never provider accounting. The provider publishes one percentage per window and never names a session; `share` is a share of subtrack's own weight `input + 1.25 × cacheWrite + 0.1 × cacheRead + 5 × output`. Keep the raw components in the response and the "estimate" wording in the UI.
+- Attribution works only because `session-env/<id>/` and `history.jsonl` are per-home while `projects/` is one shared physical store. Never infer an account from a transcript path.
+- A session id claimed by several homes (resumed under another account) goes to the freshest claim; a losing claim inside the window sets `contested`. Do not split one session between accounts.
+- Only `readonly` Claude accounts are analysed by `src/burn/scan.ts`; owned Claude homes and Grok return an empty list plus a warning rather than a guess. `makeGetBurn` routes Codex accounts to `src/burn/codex.ts` instead.
+- Codex is a different problem and has its own scanner. Its stores are per-home (`<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl`), so there are no claims to resolve and `contested` is always false; but the configured `credentialsHome` frequently is not where the work runs, so homes are discovered under `~/.codex`, `~/.codex-homes/*`, and `~/.subtrack/codex-homes/*` and matched to a card by the ChatGPT account id in `auth.json`. One physical store reachable from two logins (the cx launcher homes junction theirs together) is skipped with a warning, never split.
+- Codex rows group by the rollout's `session_id`, so subagent threads roll into the session that spawned them. Per file, prefer `token_usage_record` (CLI 0.153, one per response, deduplicated by `response_id`) and fall back to `event_msg/token_count` `last_token_usage` (CLI 0.147). Never sum both: the newer CLI writes both and doubles the total. Codex's `input_tokens` already contains `cached_input_tokens`, so subtract it to get the fresh input the shared weight expects.
+- Only the `YYYY/MM/DD` folders a window can touch are opened, which is what keeps a 60k-file Codex store cheap to scan.
+- Codex runs on the Mac and Hetzner, not on Windows, so most Codex windows are burned by sessions that are not on this machine. `codexRemotes` in `accounts.json` lists ssh targets; while a card is expanded, `src/burn/remote.ts` runs the port in `src/burn/remoteScript.ts` there via `ssh <host> python3 -` and merges the summed rows, tagging each with `host`. No rollout crosses the network and nothing is written remotely. Keep the runner and the scanner injectable; an unreachable host must degrade to a warning, never to a failed response. One trip per host and window serves every card.
+- Read only transcripts with mtime inside the window, and only the tail that can contain it (1 MiB grown to at most 64 MiB, which warns). Cache 30 seconds per account plus `resetsAt`, so a rolled window is never a stale hit.
 
 ## Sessions invariants
 
@@ -88,7 +109,7 @@ Claude projects/*/*.jsonl + Codex state_5.sqlite + live Claude process metadata
 
 The server binds plain HTTP to IPv4 `127.0.0.1` only. Probe that address rather than `localhost`, which can resolve to `::1` first on Windows. Loopback is not authentication.
 
-Current routes are `/api/health`, `/api/usage`, `/api/sessions`, `/api/services`, and `POST /api/services/action`. Route methods, Origin behavior, body limits, errors, schemas, sorting, and cache behavior belong in [HTTP API](docs/api.md); update it with any route change.
+Current routes are `/api/health`, `/api/usage`, `/api/burn`, `/api/sessions`, `/api/services`, and `POST /api/services/action`. Route methods, Origin behavior, body limits, errors, schemas, sorting, and cache behavior belong in [HTTP API](docs/api.md); update it with any route change.
 
 ```text
 PowerShell snapshot -> load/seed services.json -> probe -> sort/untracked

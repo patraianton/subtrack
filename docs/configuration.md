@@ -30,7 +30,8 @@ If accounts.json is absent, loadConfig returns these defaults in memory without 
         "claude": 180,
         "codex": 60
       },
-      "accounts": []
+      "accounts": [],
+      "codexRemotes": []
     }
 
 The file is created the next time a CLI operation saves configuration.
@@ -42,8 +43,9 @@ The file is created the next time a CLI operation saves configuration.
 | version | number | No | 1 | Format marker. The writer emits 1, but the loader does not validate it or perform version-driven migration. |
 | port | number | No | 7777 | IPv4 loopback HTTP port used by the dashboard and health probe. No integer or 1–65535 validation currently exists. |
 | uiRefreshSeconds | number | No | 30 | Intended Usage-page refresh interval in seconds. The server returns it through /api/usage. Current Usage JavaScript creates its timer before reading this value, so the page remains at 30 seconds until that client bug is fixed. |
-| pollIntervalSeconds | object | No | claude 180, codex 60 | Per-provider normal polling TTLs in seconds. The nested object is merged over these defaults. Values are not checked for positivity or finiteness. |
+| pollIntervalSeconds | object | No | claude 180, codex 60, grok 60 | Per-provider normal polling TTLs in seconds. The nested object is merged over these defaults. Values are not checked for positivity or finiteness. |
 | accounts | array of AccountConfig | No | empty array | Configured accounts. A missing or null value becomes an empty array; other invalid values are not rejected during load. |
+| codexRemotes | array of string | No | empty array | ssh targets that also run Codex under the configured logins, for example `["mac", "root@10.0.0.2"]`. Used only by the Codex session breakdown (`/api/burn`), only while a card is expanded, and only to read. Empty keeps subtrack strictly local. Entries are passed to `ssh` unvalidated, so treat this list as trusted local configuration. |
 
 Unknown top-level properties and unknown pollIntervalSeconds keys survive the in-memory object produced by loadConfig. They are not an endorsed extension mechanism and may not be preserved by future validated formats.
 
@@ -53,7 +55,7 @@ Unknown top-level properties and unknown pollIntervalSeconds keys survive the in
 |---|---|---:|---|
 | id | string | Yes | Local stable identifier. CLI add rejects an exact case-sensitive duplicate, but existing files are not checked for duplicate or path-unsafe identifiers. Use a simple unique value made from letters, digits, dots, underscores, and hyphens. |
 | label | string | Yes | Human-facing Usage/Sessions account label. Keep it free of secrets. |
-| provider | claude or codex | Yes | Provider dispatch key. The CLI accepts only these exact lowercase values; hand-edited files are not validated. At runtime, exact `codex` selects Codex and every other value falls through to Claude, so a typo is not safely rejected. |
+| provider | claude, codex, or grok | Yes | Provider dispatch key. The CLI accepts only these exact lowercase values; hand-edited files are not validated. At runtime, exact `codex` selects Codex, exact `grok` selects Grok, and every other value falls through to Claude, so a typo is not safely rejected. |
 | enabled | boolean | Yes | Only enabled accounts are polled and included in check. list still displays disabled accounts. |
 | credentialsHome | string | Operationally required | Provider-specific credential directory. The type is optional, but a missing value normally becomes an authentication error. Sessions considers configured Codex homes and Claude `readonly` homes when they contain the expected history source; Claude `owned` Usage homes are deliberately not resume targets. |
 | credentialsMode | owned or readonly | No | Credential ownership. For Claude it selects the refresh path; for a manually configured external Codex/Hermes home, `readonly` also blocks the CLI repair command and changes recovery guidance to the external owner. |
@@ -65,7 +67,7 @@ credentialsMode details:
 - The loader does not validate the enum. For Claude, any runtime value other than exact readonly falls into the owned path. Do not invent values.
 - The CLI does not create readonly Codex accounts. A manually registered Hermes shared store must set `credentialsMode: readonly`; Codex `auth.json` remains read-only in either mode, while this marker protects the external owner from unsafe repair hints/actions.
 
-The same fail-open routing applies to `provider`: only exact lowercase `codex` selects the Codex adapter. Treat any other value, including capitalization or a typo, as unsafe configuration rather than a future extension.
+The same fail-open routing applies to `provider`: only exact lowercase `codex` and `grok` select those adapters. Treat any other value, including capitalization or a typo, as unsafe configuration rather than a future extension.
 
 ### Credential-home conventions
 
@@ -78,6 +80,7 @@ CLI-created homes use:
 | Claude external readonly | Any explicitly supplied external Claude home | .credentials.json | External Claude Code process or operator |
 | Codex | ~/.subtrack/codex-homes/<id> | auth.json | Codex CLI |
 | Codex external readonly | Explicit Hermes shared-store directory | auth.json (`providers.openai-codex`) | Hermes shared resolver; subtrack never writes |
+| Grok | ~/.subtrack/grok-homes/<id> | cookie.txt (plus non-secret account.json) | Operator pastes the browser Cookie header; subtrack only reads it |
 
 An external readonly home is intentionally allowed outside ~/.subtrack. Never relabel an externally owned home as owned: rotating refresh tokens are single-use, and two writers can invalidate one another.
 
@@ -86,6 +89,8 @@ Codex `credentialsHome` is also read-only from subtrack's perspective. The CLI c
 The Codex reader also accepts an externally owned Hermes store whose `auth.json` contains `providers.openai-codex.tokens`. Set `credentialsHome` to the directory containing that file, never to the file itself, and set `credentialsMode` to `readonly`. This keeps Hermes as the refresh owner, makes `add-account` refuse an unsafe `codex login` in the canonical directory, and routes 401 guidance back to Hermes. The matching `hermes.json` subscription must pin the expected account ID.
 
 Use an absolute path for an external readonly home. A relative path is stored as supplied and can resolve differently when the daemon runs from its installed working directory.
+
+Grok has no CLI or refresh flow at all: `cookie.txt` holds the raw Cookie header value copied from a logged-in grok.com browser tab, `add-account` verifies it against the live rate-limits endpoint before registering (any unverified probe — rejection, challenge page, unexpected body — registers nothing), and the account is stored with `credentialsMode: readonly`. When grok.com rejects the cookie the card shows `auth_error` until the operator re-copies the value. Treat `cookie.txt` as a session credential equivalent to a password. The sibling `account.json` stores only the account email, captured once at registration and never refreshed — if a different account's cookie is later pasted into the same home, `list` keeps showing the old email until the account is removed and re-added.
 
 ### Privacy-safe example
 
@@ -143,6 +148,7 @@ loadConfig performs:
 2. Shallowly overlay parsed top-level properties over DEFAULT_CONFIG.
 3. Separately merge parsed pollIntervalSeconds over the two provider defaults.
 4. Replace a missing or null accounts value with an empty array.
+5. Replace a missing or null codexRemotes value with an empty array.
 
 Consequences:
 
@@ -402,7 +408,7 @@ Keep a backup, edit while avoiding concurrent writers, validate JSON before repl
 
 ## Configuration checklist
 
-- Use exact lowercase providers claude and codex.
+- Use exact lowercase providers claude, codex, and grok.
 - Use simple unique account ids; do not use path separators, `..`, or drive-qualified values.
 - Treat missing credentialsMode as owned.
 - Use readonly only for externally owned or static Claude sources.

@@ -40,6 +40,7 @@ Claude supports three onboarding modes. Codex uses its own isolated login flow.
 | Claude `readonly-home` | A separate Claude Code installation already owns and refreshes the home | External Claude Code process | Rereads the access token every poll; never refreshes or writes | `add-account <id> --provider claude --readonly-home <dir>` |
 | Claude `static-token` | You have a `claude setup-token` and do not want an interactive subtrack login | Static credential supplied by you | Stores the token in an isolated home as read-only; never refreshes it | `add-account <id> --provider claude --static-token`, token on stdin |
 | Codex isolated login | You want a separate Codex account | Codex CLI login in the isolated home | subtrack reads `auth.json`; it does not implement Codex refresh | `add-account <id> --provider codex` |
+| Grok cookie | You track a SuperGrok subscription (grok.com has no CLI login) | Browser session cookie pasted by you into `cookie.txt` | Rereads the cookie every poll; never refreshes or writes it | `add-account <id> --provider grok` |
 
 Choose exactly one Claude mode. Do not combine `--readonly-home` and `--static-token`. Use simple unique IDs such as `claude-work` or `codex-personal`; IDs become configuration keys and directory names, and the CLI does not fully validate path-like IDs.
 
@@ -99,6 +100,14 @@ npx tsx src/cli.ts add-account codex-work --provider codex --label "Codex work"
 ```
 
 For an existing Codex ID, the repeated command intentionally relaunches login even when an old `auth.json` remains, because a present token can still be expired or revoked. A cancelled repair preserves the existing configuration and reports failure rather than claiming success. Removal still does not delete an isolated home, so protect or remove obsolete credential directories separately and deliberately.
+
+### Grok cookie account
+
+```powershell
+npx tsx src/cli.ts add-account grok-main --provider grok --label "Grok main"
+```
+
+The first run creates `%USERPROFILE%\.subtrack\grok-homes\grok-main` and prints paste instructions: in a logged-in grok.com browser tab, open DevTools → Network → refresh → click any grok.com request → copy the `cookie` request-header value into `cookie.txt` in that directory, then re-run the same command. Registration probes the live rate-limits endpoint first, so a rejected cookie registers nothing. The card's session bar is the grok-4 two-hour allowance; its reset countdown appears only once the window is exhausted, because the endpoint reports no reset time before that. When grok.com rejects the cookie, the card shows `auth_error` until you re-copy the value — subtrack has no way to refresh it.
 
 An externally owned Hermes shared Codex store is a manual advanced configuration, not an `add-account` mode. Point `credentialsHome` at the directory containing the canonical `auth.json`, set `credentialsMode: readonly`, and configure the same path/account pin in `hermes.json`. Subtrack then reads Usage but refuses to launch `codex login` in that directory; refresh and re-login remain exclusively with Hermes.
 
@@ -232,12 +241,12 @@ The Usage tab reads the server's current in-memory snapshot. Refreshing the brow
 
 Each account can show:
 
-- `session`: approximately five hours;
-- `weekly`: approximately seven days;
+- `session`: approximately five hours (on a Grok card this gauge is labeled `2h · grok-4` and shows the two-hour grok-4 allowance instead);
+- `weekly`: approximately seven days (for Grok, the weekly SuperGrok allowance, which includes the `grok` CLI's spend; the row is hidden when that call fails);
 - `weekly · opus`: a Claude-only weekly Opus window when present;
 - `weekly · fable`: a Claude-only Fable window when present.
 
-Fable access and a Fable window are separate signals. A Claude account with reported access but no usable current window shows a Fable row with an em dash. A Claude account with no reported Fable entitlement shows `no access`. Codex accounts omit Fable.
+Fable access and a Fable window are separate signals. A Claude account with reported access but no usable current window shows a Fable row with an em dash. A Claude account with no reported Fable entitlement shows `no access`. Codex and Grok accounts omit Fable.
 
 The server assigns gauge severity by utilization:
 
@@ -257,16 +266,32 @@ Countdowns and visible times use the browser's local clock and time zone. They a
 
 ### Ordering, refresh, and last-known values
 
-- Cards are grouped Claude first, then Codex. Within each group, the account whose weekly-class reset (weekly, Opus, or Fable) is nearest comes first; accounts with no known reset sort last, ties break by label. Session resets do not affect ordering.
+- Cards are grouped Claude first, then Codex, then Grok. Within each group, the account whose weekly-class reset (weekly, Opus, or Fable) is nearest comes first; accounts with no known reset sort last, ties break by label. Session resets do not affect ordering.
 - The `Tightest` summary selects the highest utilization among the available session, weekly, Opus, and Fable windows.
 - The page's `updated` time is the browser receipt/render time, not a provider timestamp.
 - The current browser implementation refreshes `/api/usage` every 30 seconds even if `uiRefreshSeconds` is configured differently.
 - On connection, parse, or render failure, existing cards stay visible and the page reports `connection lost — retrying`.
 - Usage is not persisted. Preserved cards and poller carry-forward are last-known live values, not history.
 
+### Who burned the session window
+
+Click a Claude or Codex card's `session` bar (or focus it and press Enter) to expand a breakdown of the sessions that consumed that five-hour window; click again to collapse. The list stays live while the card refreshes. Grok cards are not clickable: Grok keeps no local session store.
+
+Each row shows the session's share, the machine it ran on when that is not this one, the last two path segments of its working directory, the models it used, how many assistant replies it produced, and how recently it answered (`now`, `12m ago`, or a clock time). A `?` marks a row whose session was also run under another account inside the same window — the split between the two accounts cannot be proven locally. Below the rows, `+N more sessions` sums everything past the top six, and the footer repeats the window start plus how many active sessions belonged to other accounts.
+
+The shares are subtrack's own estimate from local Claude transcripts, not provider accounting: the provider reports one percentage per window and never says which session produced it. Sessions are ranked by a cost-shaped weight (`input + 1.25 × cache write + 0.1 × cache read + 5 × output`), so a session with fewer but longer answers can outrank a chattier one. Use the order and rough proportions, not the exact percentages.
+
+For Claude, attribution only covers accounts in read-only mode, because it relies on the Claude CLI's per-home `session-env/` and `history.jsonl`. Subtrack-owned Claude homes and Grok show an explanatory line instead of a list.
+
+Codex is read from its own rollout files. Those stores are per-home, so no Codex row is ever `contested`. The catch is the opposite one: the home a card is configured with may not be where the work runs, so subtrack looks for Codex homes under `~/.codex`, `~/.codex-homes/*`, and `~/.subtrack/codex-homes/*` and matches them to the card by the ChatGPT account id in `auth.json`. A store that two logins share — the cx launcher homes point theirs at one folder — is left out with a warning rather than split between them, and one Codex row covers a session plus every subagent thread it spawned.
+
+Because Codex is not run on Windows, its sessions are usually on another machine entirely. List those machines as ssh targets in `codexRemotes` (see [Configuration](configuration.md)) and expanding a Codex card will read them too, marking each row with the host it came from. Nothing is copied or written there; a machine that is asleep or unreachable adds a warning line and the rest of the answer still shows. With no targets configured, only this machine is read.
+
+A window with no local activity says so rather than showing an empty box.
+
 ### Poll and retry behavior
 
-Default provider polling intervals are 180 seconds per Claude account and 60 seconds per Codex account. Initial accounts are staggered seven seconds apart, and a five-second heartbeat checks which account is due. Due accounts are fetched sequentially, with no overlapping poller tick.
+Default provider polling intervals are 180 seconds per Claude account and 60 seconds per Codex or Grok account. Initial accounts are staggered seven seconds apart, and a five-second heartbeat checks which account is due. Due accounts are fetched sequentially, with no overlapping poller tick.
 
 Within one provider attempt, transient transport errors and HTTP 5xx responses are retried up to three total attempts with approximately 400 ms and 800 ms delays. HTTP 4xx responses return immediately. `Retry-After` is not currently honored. Claude also performs one extra credential read/refresh attempt after a 401 when its credential mode permits it.
 
@@ -275,7 +300,7 @@ After normalization, the poller applies these schedules:
 | Status | Meaning | Next scheduled poll | What stays visible |
 |---|---|---|---|
 | `ok` | Current provider request normalized successfully | Normal provider interval | Current windows |
-| `throttled` | Provider returned 429 | 5, then 10, then 15 minutes for consecutive throttles; capped at 15 | Last-known windows, plus retry/error metadata |
+| `throttled` | Provider returned 429 | 5, then 10, then 15 minutes for consecutive throttles (15 thereafter), or the provider's `Retry-After` when it asks for longer, capped at 60 minutes | Last-known windows, plus retry/error metadata |
 | `auth_error` | Credentials are missing, refresh failed, or the provider rejected them (`401`; Claude also maps `403` here) | 15 minutes | Last-known windows and current auth error |
 | `stale` | A read-only Claude file has a known expired access token | Normal provider interval; no provider call or refresh | Last-known windows and stale-credential error |
 | `error` | Transport, parsing, unexpected response, Codex `403`, or other failure | Normal provider interval | Last-known windows and current error |

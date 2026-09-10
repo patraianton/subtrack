@@ -8,7 +8,7 @@ For the exact HTTP contract, see [HTTP API](api.md). Operational and trust-bound
 
 `subtrack` is one local web server with three independent surfaces:
 
-- **Usage** polls Claude and Codex account limits, normalizes them, and keeps the latest value per account in process memory.
+- **Usage** polls Claude, Codex, and Grok account limits, normalizes them, and keeps the latest value per account in process memory. On demand it can also break a Claude or Codex session window down by local session ("burn"), which is an expansion of the Usage card rather than a separate surface.
 - **Sessions** reads existing local Claude/Codex work-session metadata, deduplicates copies, and on Windows correlates live Claude processes with their account home and working directory.
 - **Services** takes short-lived Windows system snapshots, compares them with a local service manifest, appends the latest independently collected Hermes fleet snapshot when configured, and exposes explicit Task Scheduler actions.
 
@@ -19,6 +19,7 @@ There is deliberately no subtrack-owned history database:
 - `SnapshotStore` contains only the last Usage value per account and disappears when the process exits.
 - Sessions reads provider-owned history from Claude JSONL files and Codex SQLite databases. It retains only process-local metadata/file caches and does not write a session database or persist transcript content.
 - Normal Services inventory has a 10-second in-memory response cache. The optional Hermes monitor also persists bounded recovery counters, recent transitions, and a JSONL incident log; it does not store prompts or token values.
+- Burn reads provider-owned transcripts and per-home session state on request and keeps only a 30-second response cache. It writes no token ledger and stores no transcript content.
 - The browser does not persist observations.
 - `accounts.json`, `services.json`, optional `hermes.json`, Hermes monitor state, provider-owned session stores, credential homes, the daemon lock, and logs are durable provider/configuration/operational state, not usage/session measurement history.
 
@@ -48,9 +49,9 @@ The Poller owns scheduling and resilience; adapters own network calls and normal
 | Field | Meaning |
 | --- | --- |
 | `accountId`, `label` | Stable configuration identity and display label. Callers must keep the store key equal to `accountId` and keep account IDs unique. |
-| `provider` | `claude` or `codex`. |
-| `session` | Approximately five-hour window, or `null`. |
-| `weekly` | Approximately seven-day window, or `null`. |
+| `provider` | `claude`, `codex`, or `grok`. |
+| `session` | Approximately five-hour window for Claude/Codex; for Grok this slot carries the grok-4 two-hour allowance. `null` when unknown. |
+| `weekly` | Approximately seven-day window, or `null`. For Grok this is the weekly SuperGrok allowance from the advisory `GetGrokCreditsConfig` gRPC-Web call; `null` whenever that call fails. |
 | `weeklyOpus` | Claude-only Opus weekly window, or `null`. |
 | `fable` | Claude-only Fable weekly window, or `null`. |
 | `fableAccess` | Whether Claude returned a Fable limit entry. This is independent of `fable`: `true` with a null window means access is known but the window was malformed or absent. Codex reports `false`. |
@@ -73,12 +74,12 @@ These thresholds are hard-coded and inclusive at 70 and 90. The implementation d
 
 Enabled accounts are initially staggered seven seconds apart. A five-second heartbeat checks which accounts are due, and due accounts are fetched sequentially. A running guard drops overlapping heartbeats. Stopping the Poller clears future heartbeats but does not cancel an in-flight request.
 
-Normal provider TTLs come from configuration (defaults: Claude 180 seconds, Codex 60 seconds). Special scheduling is:
+Normal provider TTLs come from configuration (defaults: Claude 180 seconds, Codex and Grok 60 seconds). Special scheduling is:
 
 | Status | Next attempt | Backoff state | Last-known fields carried forward |
 | --- | --- | --- | --- |
 | `ok` | Provider TTL | Reset | No |
-| `throttled` | 5, then 10, then 15 minutes; 15 minutes thereafter | Increment | All four windows and `fableAccess` |
+| `throttled` | 5, then 10, then 15 minutes (15 thereafter), or the provider's `Retry-After` when later, capped at 60 minutes | Increment | All four windows and `fableAccess` |
 | `auth_error` | 15 minutes | Reset | All four windows and `fableAccess` |
 | `stale` | Provider TTL | Reset | All four windows and `fableAccess` |
 | `error` | Provider TTL | Reset | All four windows and `fableAccess` |
@@ -87,7 +88,7 @@ Carry-forward replaces only `session`, `weekly`, `weeklyOpus`, `fable`, and `fab
 
 `SnapshotStore` is a mutable `Map<string, NormalizedUsage>`. A repeated key replaces its value while preserving key insertion order. `get()` and `all()` return shared object references; only the array returned by `all()` is new. There is no defensive copying, delete, TTL, eviction, persistence, or history.
 
-The Usage API enriches a copy of each top-level record, then sorts by the largest utilization among `session`, `weekly`, and `fable`. `weeklyOpus` is not part of server sorting. Ties retain store order. The browser subsequently groups Claude before Codex, preserving that order within each provider, and its own “Tightest” summary does include Opus.
+The Usage API enriches a copy of each top-level record, then sorts by the largest utilization among `session`, `weekly`, and `fable`. `weeklyOpus` is not part of server sorting. Ties retain store order. The browser subsequently groups Claude, then Codex, then Grok, preserving that order within each provider, and its own “Tightest” summary does include Opus.
 
 ## Provider and credential lifecycles
 
@@ -115,11 +116,16 @@ Read-only mode is for an externally owned Claude CLI home or a static setup-toke
 
 Codex login uses an isolated `CODEX_HOME`, normally `~/.subtrack/codex-homes/<id>`, and writes `auth.json`. Onboarding registers a new account only after the interactive child exits successfully and the file yields an access token. Repeating `add-account` for an existing Codex ID intentionally reruns login in the configured home, preserving its label and configuration. The reader also accepts the nested `providers.openai-codex` shape used by an explicitly configured external Hermes shared store. Subtrack rereads the access token and account ID for each poll, maps credential-read failures to `auth_error`, and has no Codex refresh or credential-persistence path.
 
+### Grok
+
+Grok has no CLI login. The credential is the browser session cookie for grok.com, pasted once by the operator into `~/.subtrack/grok-homes/<id>/cookie.txt`; the reader tolerates a BOM, a copied `Cookie:` prefix, and line wraps. `add-account` probes the live rate-limits endpoint before registering (a rejected cookie registers nothing) and stores the account as `credentialsMode: readonly`. There is no refresh or write path: an expired cookie surfaces as `auth_error` until re-copied. Registration also captures the account email into a non-secret `account.json` for labels and `list`.
+
 ### Provider normalization
 
 - Claude maps `five_hour`, `seven_day`, and `seven_day_opus`; it finds Fable by exact `scope.model.display_name === "Fable"` inside `limits`. A present Fable entry establishes access even if its percent is unusable. A 2xx response with no windows still normalizes as `ok`.
 - Codex inspects `rate_limit.primary_window` and `secondary_window`, classifying each by which reference duration it is nearer to: 18,000 seconds or 604,800 seconds. A 2xx body with no recognized window becomes `error`.
-- Both usage calls use a shared HTTP wrapper: at most three attempts by default, retrying transient transport failures and 5xx with 400/800 ms delays. It returns 4xx immediately. Claude's forced credential retry after 401 is an additional layer.
+- Grok POSTs `{"requestKind":"DEFAULT","modelName":"grok-4"}` to `grok.com/rest/rate-limits` (verified live 2026-08-21) and maps `remainingQueries`/`totalQueries` to one session-slot window for the two-hour allowance; `resetsAt` is anchored only from an exhausted window's `waitTimeSeconds`. A 2xx body without those counters becomes `error`. HTTP 401 and 403 both map to `auth_error` (cookie rejected).
+- All usage calls use a shared HTTP wrapper: at most three attempts by default, retrying transient transport failures and 5xx with 400/800 ms delays. It returns 4xx immediately. Claude's forced credential retry after 401 is an additional layer.
 
 ## Sessions data flow
 
@@ -214,6 +220,31 @@ Idle `gateway_state.updated_at` is not treated as a heartbeat. Process command l
 
 The latest snapshot is converted to public `kind: hermes` Services rows without credential paths, account IDs, tokens, command lines, or webhook URLs. Recovery/canary reservations, counters, and the last 50 sanitized events are written atomically to `~/.subtrack/hermes-monitor-state.json`; transitions append to `~/.subtrack/logs/hermes-monitor.jsonl`. Optional heartbeat/alert webhooks are best-effort and do not change local health.
 
+## Burn data flow
+
+Burn answers "which local session ate this account's five-hour window". It reuses the Usage snapshot only for the window boundary; the numbers themselves come from the provider's own local session files. Claude and Codex reach that answer from different stores and have a scanner each.
+
+```mermaid
+flowchart LR
+    SNAP["SnapshotStore\nsession.resetsAt"] --> WIN["Window = resetsAt - 5 h\n(else rolling 5 h)"]
+    HOMES["Claude: every read-only home\nsession-env/ + history.jsonl\nCodex: every home's auth.json account id"] --> CLAIM["Session-id ownership\nand claim freshness"]
+    WIN --> PICK["Session files with mtime in window"]
+    CLAIM --> PICK
+    PICK --> TAIL["Tail read + usage sum per session"]
+    TAIL --> RANK["Cost-shaped weight, shares, contested flag"]
+    RANK --> CACHE["30 s cache per account + window"]
+    CACHE --> API["GET /api/burn"]
+    API --> UI["web/burn.js under the clicked session bar"]
+```
+
+For Claude, attribution rests on an asymmetry: `projects/` is one physical store shared by every home (junctions), but `session-env/` and `history.jsonl` are per-home. A session id present in several homes — roughly one in ten, from resuming a session under a different account — goes to the home with the freshest evidence, and is flagged `contested` when a losing claim also falls inside the window. Subtrack-owned Claude homes and Grok are refused with a warning rather than guessed at.
+
+For Codex the asymmetry is reversed: each home owns its rollout store outright, but the home a card is configured with is often not the home the work runs in (an auth mirror, or a launcher home whose store is a dead junction). Codex homes are therefore discovered under the conventional roots and matched to a card by the ChatGPT account id in `auth.json`; a store two logins can both reach is skipped with a warning instead of split. Rows group by the rollout's `session_id`, which folds subagent threads into the session that spawned them.
+
+Codex also breaks the "everything is local" rule, because on this fleet Codex deliberately does not run on Windows: the sessions that burn a Codex window are on the Mac and on Hetzner. Each ssh target in `codexRemotes` is therefore scanned in place — `ssh <host> python3 -` fed the scan in `burn/remoteScript.ts`, returning summed rows and nothing else — and the rows merge into the answer carrying the host they came from. No rollout crosses the network, nothing is written on the far side, and a host that does not answer becomes a warning rather than a failure.
+
+The weight is `input + 1.25 × cacheWrite + 0.1 × cacheRead + 5 × output`. It is subtrack's own cost-shaped ranking, not a provider formula; raw token components travel in the response so the UI (or a reader) can reweigh them.
+
 ## Module ownership and dependency-injection seams
 
 | Module | Owns | Important injected seam |
@@ -226,10 +257,16 @@ The latest snapshot is converted to public `kind: hermes` Services rows without 
 | `src/adapters/*.ts` | Provider requests, normalization, error mapping | Token/auth source and fetch |
 | `src/snapshotStore.ts` | Last Usage value per account | None |
 | `src/thresholds.ts` | Utilization-to-severity policy | None |
-| `src/server.ts` | HTTP routing, static files, API enrichment/composition | Sessions/Services providers and action handler in `createApp()` |
+| `src/server.ts` | HTTP routing, static files, API enrichment/composition | Sessions/Services/Burn providers and action handler in `createApp()` |
 | `src/sessions/types.ts` | Sessions, live-window, activity, and binding contracts | None |
 | `src/sessions/scan.ts` | Store discovery, bounded metadata extraction, deduplication, activity/correlation, resume commands, cache | Base home, accounts, clock, PowerShell/live-window source, cache/recent thresholds |
 | `src/sessions/windows.ts` | Minimal live Claude process metadata acquisition | `PwshRunner` |
+| `src/burn/types.ts` | Per-session window-consumption contract | None |
+| `src/burn/read.ts` | Tail reading, path cleaning, and the shared cost-shaped weight | None |
+| `src/burn/scan.ts` | Claude session-to-account ownership, window token sums, weighting, contested claims, provider routing, cache | Base home, accounts, clock, window hours, cache TTL |
+| `src/burn/codex.ts` | Codex home discovery by account id, per-home rollout scan, rollout-format handling, remote merge | Base home, accounts, clock, window hours, ssh targets, remote scanner |
+| `src/burn/remote.ts` | ssh trip per host and window, answer parsing, per-host cache | Remote runner, cache TTL, clock |
+| `src/burn/remoteScript.ts` | The python port of the Codex scan that runs on the remote machine | None (stdlib only) |
 | `src/ops/types.ts` | Authoritative Services, Windows snapshot, and action contracts | None |
 | `src/ops/windows.ts` | PowerShell snapshot acquisition | `PwshRunner` |
 | `src/ops/config.ts`, `seed.ts` | Service manifest persistence and first-run task seed | Base home and supplied snapshot |
