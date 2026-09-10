@@ -20,3 +20,10 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# --- Private-checkout scratch: local notes, backups, temp dumps ---
+HANDOVER-*.md
+TASK-*.md
+*.bak
+*.bak-*
+sess_tmp.json
