@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { join, normalize, extname, sep } from 'node:path';
 import { homedir } from 'node:os';
 import open from 'open';
-import type { NormalizedUsage, Severity, UsageWindow } from './types.ts';
+import type { NormalizedUsage, Severity, SubtrackConfig, UsageWindow } from './types.ts';
 import { severityFor } from './thresholds.ts';
 import { SnapshotStore } from './snapshotStore.ts';
 import { Poller } from './poller.ts';
@@ -16,6 +16,9 @@ import { makeRunServiceAction } from './ops/actions.ts';
 import { runPwsh } from './ops/windows.ts';
 import type { SessionsResponse } from './sessions/types.ts';
 import { makeGetSessions } from './sessions/scan.ts';
+import type { BurnResponse } from './burn/types.ts';
+import { makeGetBurn } from './burn/scan.ts';
+import { makeRemoteScanner, makeSshRunner } from './burn/remote.ts';
 import { HermesFleetMonitor } from './hermes/monitor.ts';
 import { HermesMonitorSupervisor } from './hermes/supervisor.ts';
 
@@ -37,9 +40,10 @@ export function enrichUsage(u: NormalizedUsage): EnrichedUsage {
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
-export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: { claude: number; codex: number }; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult>; getSessions?: () => Promise<SessionsResponse> }): Server {
+export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: SubtrackConfig['pollIntervalSeconds']; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult>; getSessions?: () => Promise<SessionsResponse>; getBurn?: (accountId: string, resetsAt: string | null) => Promise<BurnResponse> }): Server {
   return createServer(async (req, res) => {
-    const url = (req.url ?? '/').split('?')[0]!;
+    const raw = req.url ?? '/';
+    const url = raw.split('?')[0]!;
     try {
       if (req.method === 'POST' && url === '/api/services/action') {
         if (!opts.runServiceAction) { safeWrite(res, 503, { error: 'actions unavailable' }); return; }
@@ -76,6 +80,22 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
           return json(res, await opts.getSessions(), noStore);
         } catch (e) {
           safeWrite(res, 500, { error: 'sessions failed', detail: String((e as Error).message) }, noStore);
+          return;
+        }
+      }
+      if (url === '/api/burn') {
+        const noStore = { 'cache-control': 'no-store' };
+        if (req.method !== 'GET') { safeWrite(res, 405, { error: 'method not allowed' }, { ...noStore, allow: 'GET' }); return; }
+        if (!opts.getBurn) { safeWrite(res, 503, { error: 'burn unavailable' }, noStore); return; }
+        const accountId = new URL(raw, 'http://127.0.0.1').searchParams.get('account');
+        if (!accountId) { safeWrite(res, 400, { error: 'account query parameter required' }, noStore); return; }
+        // The window is anchored on the provider's own reset time from the latest snapshot; with no
+        // snapshot the scan falls back to a rolling five hours rather than refusing to answer.
+        const snapshot = store.all().find((usage) => usage.accountId === accountId);
+        try {
+          return json(res, await opts.getBurn(accountId, snapshot?.session?.resetsAt ?? null), noStore);
+        } catch (e) {
+          safeWrite(res, 500, { error: 'burn failed', detail: String((e as Error).message) }, noStore);
           return;
         }
       }
@@ -155,7 +175,16 @@ export async function serve(base: string = homedir(), opts: { open?: boolean } =
   const getServices = makeGetServices({ base, run: runPwsh, additionalServices: () => hermesSupervisor.serviceRows() });
   const runServiceAction = makeRunServiceAction({ base, run: runPwsh });
   const getSessions = makeGetSessions({ base, accounts: cfg.accounts, run: runPwsh });
-  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction, getSessions });
+  // Codex runs on the Mac and Hetzner, so most Codex windows are burned by sessions that are not on
+  // this machine; the scanner reaches them over ssh only while a card is expanded.
+  const codexRemotes = cfg.codexRemotes ?? [];
+  const getBurn = makeGetBurn({
+    base,
+    accounts: cfg.accounts,
+    remotes: codexRemotes,
+    scanRemote: codexRemotes.length > 0 ? makeRemoteScanner(makeSshRunner()) : undefined,
+  });
+  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction, getSessions, getBurn });
   // Reject (rather than hang) if the port is taken — the daemon supervisor reacts to the non-zero exit.
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => reject(err);

@@ -1,4 +1,4 @@
-:root { color-scheme: dark; --ok: #2ecc71; --warn: #f1c40f; --crit: #e74c3c; --bg: #0d1117; --card: #161b22; --fg: #e6edf3; --muted: #8b949e; --claude: #d97757; --codex: #10a37f; }
+:root { color-scheme: dark; --ok: #2ecc71; --warn: #f1c40f; --crit: #e74c3c; --bg: #0d1117; --card: #161b22; --fg: #e6edf3; --muted: #8b949e; --claude: #d97757; --codex: #10a37f; --grok: #c9d1d9; }
 * { box-sizing: border-box; }
 body { margin: 0; font: 14px/1.4 ui-sans-serif, system-ui, Segoe UI, sans-serif; background: var(--bg); color: var(--fg); }
 header { display: flex; align-items: baseline; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #21262d; }
@@ -11,15 +11,18 @@ h1 { font-size: 18px; margin: 0; }
 /* provider accent — an inset left stripe (box-shadow, so it never fights the auth_error border-color) */
 .card.claude { box-shadow: inset 3px 0 0 var(--claude); }
 .card.codex  { box-shadow: inset 3px 0 0 var(--codex); }
+.card.grok   { box-shadow: inset 3px 0 0 var(--grok); }
 /* full-width section header — forces each provider onto a fresh grid row */
 .group { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin: 2px 0 -4px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .group::before { content: ''; width: 10px; height: 10px; border-radius: 3px; }
 .group.claude::before { background: var(--claude); }
 .group.codex::before  { background: var(--codex); }
+.group.grok::before   { background: var(--grok); }
 .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #21262d; color: var(--muted); text-transform: uppercase; }
 .badge.claude { background: var(--claude); color: #0d1117; }
 .badge.codex  { background: var(--codex); color: #0d1117; }
+.badge.grok   { background: var(--grok); color: #0d1117; }
 .label { font-weight: 600; }
 .dot { width: 8px; height: 8px; border-radius: 50%; margin-left: 8px; }
 .dot.ok { background: var(--ok); } .dot.throttled, .dot.error { background: var(--muted); } .dot.auth_error { background: var(--crit); }
@@ -35,7 +38,27 @@ h1 { font-size: 18px; margin: 0; }
 .fill.ok { background: var(--ok); } .fill.warn { background: var(--warn); } .fill.crit { background: var(--crit); }
 .gauge.noaccess { opacity: 0.4; } /* Fable entitlement absent — show the fact, muted, no fill */
 .gauge.noaccess .gauge-top span:last-child { font-style: italic; }
+/* clickable session bar -> local per-session breakdown of that window */
+.gauge.clickable { cursor: pointer; }
+.gauge.clickable:hover .gauge-top, .gauge.clickable:focus-visible .gauge-top { color: var(--fg); }
+.gauge.clickable:focus-visible { outline: 1px solid var(--muted); outline-offset: 3px; border-radius: 4px; }
+.caret { margin-left: 6px; opacity: 0.7; }
+.burn { margin: 2px 0 10px; padding: 6px 8px; border-radius: 6px; background: rgba(127,127,127,0.08); }
+.burn-row { display: grid; grid-template-columns: 34px 46px 1fr; grid-template-areas: 'share bar what' '. . meta'; align-items: center; gap: 2px 8px; font-size: 12px; padding: 3px 0; }
+.burn-row.muted { opacity: 0.6; }
+.burn-share { grid-area: share; text-align: right; font-variant-numeric: tabular-nums; }
+.burn-bar { grid-area: bar; height: 6px; border-radius: 3px; background: #21262d; overflow: hidden; }
+.burn-bar > span { display: block; height: 100%; background: var(--claude); }
+.burn-what { grid-area: what; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.burn-meta { grid-area: meta; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.burn-flag { margin-left: 5px; color: var(--warn); cursor: help; }
+/* Codex sessions usually ran on another machine; the host prefix says which one. */
+.burn-host { color: var(--muted); font-size: 11px; margin-right: 4px; }
+.burn-note { color: var(--muted); font-size: 11px; padding-top: 4px; }
+.burn-note.err { color: var(--crit); }
 .err { color: var(--crit); font-size: 12px; margin-top: 6px; }
+/* throttled: the provider asked us to wait — amber, not the red that means "this card needs you" */
+.err.wait { color: var(--warn); }
 .tabs { display: flex; gap: 12px; margin: 0 16px; }
 .tabs a { color: inherit; text-decoration: none; opacity: 0.6; padding: 2px 6px; border-radius: 6px; }
 .tabs a.active { opacity: 1; background: rgba(127,127,127,0.18); }
@@ -128,4 +151,38 @@ h1 { font-size: 18px; margin: 0; }
   .session-window-meta { display: flex; flex: 1 1 100%; flex-wrap: wrap; }
   .session-window-action, .session-row-action { margin-left: auto; }
   .session-row-status { order: -1; flex: 1 1 100%; }
+}
+
+/* Commands tab — a cheat sheet for launchers.ps1 and the panel itself. Pure static page:
+   no requests, no state beyond the search box and the "quiz me" mode. */
+.cmd-page { padding: 16px 20px 32px; display: flex; flex-direction: column; gap: 18px; }
+.cmd-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.cmd-bar input { flex: 1 1 320px; max-width: 520px; height: 34px; border: 1px solid #30363d; border-radius: 6px; outline: none; background: var(--card); color: var(--fg); padding: 0 10px; font: inherit; }
+.cmd-bar input:focus { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88, 166, 255, .12); }
+.cmd-bar input::placeholder { color: var(--muted); }
+.cmd-toggle { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; cursor: pointer; user-select: none; }
+.cmd-group { min-width: 0; }
+.cmd-group h2 { margin: 0 0 3px; font-size: 15px; }
+.cmd-group.claude h2 { border-left: 3px solid var(--claude); padding-left: 8px; }
+.cmd-group.codex h2 { border-left: 3px solid var(--codex); padding-left: 8px; }
+.cmd-group.grok h2 { border-left: 3px solid var(--grok); padding-left: 8px; }
+.cmd-note { margin: 0 0 9px; color: var(--muted); font-size: 12px; max-width: 900px; }
+.cmd-rows { display: flex; flex-direction: column; gap: 4px; }
+.cmd-row { width: 100%; display: grid; grid-template-columns: minmax(180px, 300px) 1fr auto; align-items: baseline; gap: 14px; padding: 8px 11px; border: 1px solid #21262d; border-radius: 8px; background: var(--card); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cmd-row:hover { border-color: #3c4652; background: #1b222b; }
+.cmd-row:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+.cmd-name { color: var(--fg); font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 600; overflow-wrap: anywhere; }
+.cmd-desc { color: var(--muted); font-size: 12.5px; }
+.cmd-copy { color: var(--muted); font-size: 11px; opacity: 0; white-space: nowrap; }
+.cmd-row:hover .cmd-copy, .cmd-row:focus-visible .cmd-copy { opacity: .8; }
+
+/* "Quiz me": explanations are blurred; only the hovered row is revealed. */
+.cmd-quizmode .cmd-desc { filter: blur(5px); opacity: .55; transition: filter .12s ease; }
+.cmd-quizmode .cmd-row:hover .cmd-desc, .cmd-quizmode .cmd-row:focus-visible .cmd-desc { filter: none; opacity: 1; }
+.cmd-quizmode .cmd-note { filter: blur(4px); }
+.cmd-quizmode .cmd-note:hover { filter: none; }
+
+@media (max-width: 760px) {
+  .cmd-row { grid-template-columns: 1fr; gap: 4px; }
+  .cmd-copy { display: none; }
 }
