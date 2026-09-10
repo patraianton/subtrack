@@ -8,7 +8,12 @@ export const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 // (2026-06-30): the OAuth token endpoint is application/x-www-form-urlencoded, NOT JSON (a JSON body
 // returns HTTP 400). subtrack refreshes each account's token in its own isolated CLAUDE_CONFIG_DIR,
 // so nothing else rotates it — true set-and-forget.
-export const CLAUDE_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+export const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
+// Claude Code sends its own user agent on the token call. Without one, Cloudflare in front of
+// the endpoint answers 429 `rate_limit_error` to every request, valid token or not (verified
+// 2026-08-29 from this machine: default agent -> 429, `claude-cli/...` -> normal answer). The
+// host moved too: console.anthropic.com now answers 429/404 for every refresh.
+export const CLAUDE_USER_AGENT = 'claude-cli/2.1.251 (external, cli)';
 const EXPIRY_SKEW_MS = 60_000;
 const DEFAULT_EXPIRES_IN = 28800; // 8h fallback if the server omits expires_in
 
@@ -17,8 +22,18 @@ export interface ClaudeAiOauth {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: number; // epoch ms
+  /**
+   * Absolute end of the refresh token's life, epoch ms. Anthropic gives a refresh token a fixed
+   * lifetime from the interactive login (~4 weeks) and rotation does NOT extend it: cc3 refreshed
+   * normally at 15:41 UTC on 2026-08-27 and was dead by 18:53 UTC, exactly the stamp written at
+   * login. Once it passes, only a new `claude` login for that home can revive the account.
+   */
+  refreshTokenExpiresAt?: number;
   scopes?: string[];
 }
+
+/** The refresh token itself is dead (invalid_grant). Only a new interactive login fixes it. */
+export class ExpiredRefreshTokenError extends Error {}
 
 /** Per-account isolated Claude config dir: <base>/claude-homes/<id>. */
 export function claudeHomeDir(base: string, id: string): string {
@@ -123,19 +138,35 @@ export class ClaudeAuth {
   private async refresh(refreshToken: string): Promise<ClaudeAiOauth> {
     const res = await fetchWithRetry(CLAUDE_TOKEN_URL, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': CLAUDE_USER_AGENT },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
         client_id: CLAUDE_CLIENT_ID,
       }).toString(),
     }, { fetchImpl: this.fetchImpl });
-    if (!res.ok) throw new Error(`Claude token refresh failed: HTTP ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      // invalid_grant = the refresh token is spent or past its absolute expiry. Retrying can never
+      // fix it, so say what actually has to happen instead of leaving a bare "HTTP 400" on the card.
+      if (/invalid_grant/i.test(body)) {
+        throw new ExpiredRefreshTokenError(
+          'Claude token refresh failed: refresh token expired (invalid_grant) - this home needs a new login: ' +
+            'set CLAUDE_CONFIG_DIR to it and run `claude`, then /login. Or point the account at a live ' +
+            'Claude Code home with credentialsMode "readonly", which never needs a login of its own.',
+        );
+      }
+      throw new Error(`Claude token refresh failed: HTTP ${res.status}${body ? ` - ${body.slice(0, 200)}` : ''}`);
+    }
     const j = (await res.json()) as Record<string, unknown>;
+    // Keep the refresh-token expiry the server reports. Without it the stored stamp stays frozen at
+    // whatever the login wrote, and nothing can warn before the account goes dark.
+    const refreshTtl = typeof j['refresh_token_expires_in'] === 'number' ? (j['refresh_token_expires_in'] as number) : undefined;
     return {
       accessToken: String(j['access_token']),
       refreshToken: typeof j['refresh_token'] === 'string' ? (j['refresh_token'] as string) : refreshToken,
       expiresAt: this.clock() + (typeof j['expires_in'] === 'number' ? (j['expires_in'] as number) : DEFAULT_EXPIRES_IN) * 1000,
+      ...(refreshTtl === undefined ? {} : { refreshTokenExpiresAt: this.clock() + refreshTtl * 1000 }),
       scopes: typeof j['scope'] === 'string' ? (j['scope'] as string).split(' ') : undefined,
     };
   }
