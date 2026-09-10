@@ -22,7 +22,7 @@ This document separates current mitigation from open risk. Loopback, Limited tas
 ### Open risk
 
 - All local API endpoints are unauthenticated.
-- /api/health, /api/usage, and /api/services accept methods beyond a strict GET-only contract. `/api/sessions` does enforce GET, but remains unauthenticated.
+- /api/health, /api/usage, and /api/services accept methods beyond a strict GET-only contract. `/api/sessions` and `/api/burn` do enforce GET, but remain unauthenticated.
 - Another same-user process can call the APIs directly and omit Origin.
 - A reverse proxy, port forward, browser extension, or changed bind behavior can invalidate the local-only assumption.
 - The Usage UI renders with `innerHTML` and interpolates provider, status, and severity keys without escaping or an allowlist; utilization also enters an inline style. The current typed server path normally supplies expected values, but malformed configuration or a compromised API response can cross this browser-rendering boundary.
@@ -62,6 +62,27 @@ Open risk and implementation detail:
 
 Treat Sessions API captures and screenshots like transcript indexes. Review paths, titles, IDs, and commands before sharing them, even though message bodies are omitted.
 
+## Burn breakdown confidentiality
+
+`/api/burn` reads the same transcript store as Sessions — and, for Codex accounts, the rollout stores under the Codex homes — to answer which session consumed a five-hour window. It can expose session UUIDs, exact working directories, model names, reply counts, per-session token totals, and activity times, plus a count of sessions belonging to other accounts. Codex warnings can also contain the full path of a session store shared by several logins. Answering a Codex request reads `auth.json` in every discovered Codex home to obtain its account id; no token from those files is used, kept, or returned.
+
+A Codex request is also the one place subtrack leaves this machine. Each entry in `codexRemotes` is passed to `ssh` and fed a scan script that runs there under the operator's own ssh identity, so `accounts.json` becomes a file that can name a command target: treat it as trusted local configuration and note that the unauthenticated `/api/burn` route is what triggers those connections. The remote side is read-only, returns only summed rows, and can surface remote paths and remote session ids in the response and its warnings.
+
+Current mitigation:
+
+- Only assistant records' `message.usage` numbers, `model`, `cwd`, `sessionId`, and `timestamp` are extracted; prompts, messages, tool calls, and tool output are never parsed into the response.
+- Only transcripts whose mtime falls inside the window are opened, and only the tail that can contain the window is read, so untouched history is not traversed.
+- Ownership evidence comes from directory names in `session-env/` and `sessionId`/`timestamp` fields in `history.jsonl`. The prompt text stored alongside them in `history.jsonl` is never returned.
+- The UI shows only the last two path segments; the full path and session id live in a hover tooltip, and there is no copyable command or any endpoint that resumes, edits, or deletes a session.
+- Responses carry `Cache-Control: no-store`.
+
+Open risk:
+
+- `history.jsonl` lines containing prompt text pass through process memory while session ids are matched, exactly as Sessions' transcript chunks do.
+- Shares are an estimate. Presenting them as the provider's own accounting, or as proof of what a colleague's session cost, would over-claim what the data supports.
+- A session resumed under two accounts is attributed whole to the freshest claim. The `contested` flag warns about it; it does not resolve it.
+- Loopback has no authentication, so any same-user process can read the breakdown.
+
 ## Credential storage and ownership
 
 ### Actual storage
@@ -75,6 +96,7 @@ Live authentication uses provider-specific files in isolated or external homes:
 | Claude readonly static | .credentials.json in an isolated static-token home | Re-read every call | Never |
 | Codex | auth.json in an isolated CODEX_HOME | Re-read | No Codex refresh or persistence in subtrack |
 | Codex via Hermes shared store | externally owned `providers.openai-codex` auth.json | Re-read and live-probe | Never; periodic canary invokes Hermes as the sole refresh owner |
+| Grok | cookie.txt in an isolated grok home — a raw browser session cookie, equivalent to a logged-in grok.com session | Re-read every call | Never; only the operator replaces it by re-copying from the browser |
 
 src/secrets.ts contains a Windows keyring abstraction under service name subtrack, but current adapters do not use it. Do not claim that live provider credentials are protected by Windows Credential Manager merely because that component exists.
 

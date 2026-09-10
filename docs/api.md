@@ -22,8 +22,10 @@ For system ownership and data flow, see [Architecture](architecture.md). Service
 | Method | Path | Success body | State change |
 | --- | --- | --- | --- |
 | `GET` by convention | `/api/health` | `HealthResponse` | No |
+| `GET` by convention | `/api/conveyor` | `ConveyorStatus` (pass-through) | No |
 | `GET` by convention | `/api/usage` | `UsageResponse` | No |
 | `GET` | `/api/sessions` | `SessionsResponse` | No |
+| `GET` | `/api/burn?account=<id>` | `BurnResponse` | No |
 | `GET` by convention | `/api/services` | `ServicesResponse` | No, except first request can seed `services.json` |
 | `POST` | `/api/services/action` | `ActionResult` | Yes |
 
@@ -32,7 +34,7 @@ For system ownership and data flow, see [Architecture](architecture.md). Service
 The schemas below use TypeScript notation. Usage contracts come from `src/types.ts`; the authoritative Services and action contracts come from `src/ops/types.ts`. Optional properties marked `?` can be omitted from serialized JSON. ISO timestamps are strings produced with `Date.toISOString()` unless they originate as unvalidated Windows Task Scheduler strings.
 
 ```ts
-type Provider = 'claude' | 'codex';
+type Provider = 'claude' | 'codex' | 'grok';
 type UsageStatus = 'ok' | 'throttled' | 'auth_error' | 'stale' | 'error';
 type Severity = 'ok' | 'warn' | 'crit';
 
@@ -64,6 +66,10 @@ interface HealthResponse {
 ```
 
 This is a process/HTTP routing check only. It does not verify provider connectivity, poll freshness, credential validity, Sessions-store/window inspection, Services snapshot acquisition, the daemon, or the Scheduled Task.
+
+## `GET /api/conveyor`
+
+Returns the contents of `~/.autopase-conveyor-status.json` verbatim with `Cache-Control: no-store`. The file is written by an external pipeline; subtrack does not validate it. When the file is missing or unparsable the route answers `200` with `{"project":null,"task":null,"timeline":[]}`, which the Conveyor tab renders as "no active task". The fields the tab reads are `project`, `task`, `phase`, `status` (`ok` | `warn` | `err` | `info`), `next`, `pulse` (`{at, text}`), `links` (name to URL), `timeline` (`{ts, level, text}[]`, newest rendered first) and `updatedAt`.
 
 ## `GET /api/usage`
 
@@ -97,6 +103,7 @@ interface UsageResponse {
   pollIntervalSeconds: {
     claude: number;
     codex: number;
+    grok: number;
   };
 }
 ```
@@ -128,7 +135,8 @@ Example shape:
   "uiRefreshSeconds": 30,
   "pollIntervalSeconds": {
     "claude": 180,
-    "codex": 60
+    "codex": 60,
+    "grok": 60
   }
 }
 ```
@@ -136,7 +144,8 @@ Example shape:
 ### Usage semantics
 
 - `session`, `weekly`, `weeklyOpus`, and `fable` are independent nullable windows.
-- `fableAccess` is independent of `fable`. `true` plus `fable: null` means a Claude Fable entry existed but did not yield a valid numeric window. Codex always reports `false` and `null`.
+- `fableAccess` is independent of `fable`. `true` plus `fable: null` means a Claude Fable entry existed but did not yield a valid numeric window. Codex and Grok always report `false` and `null`.
+- For Grok, `session` is the grok-4 DEFAULT two-hour rolling window (`remainingQueries`/`totalQueries` as a percent). Its `resetsAt` is null while queries remain — the endpoint anchors a wait time only when the window is exhausted. `weekly` is the weekly SuperGrok allowance (`credit_usage_percent` and the current period end from the gRPC-Web call `grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig`), which also counts the `grok` CLI's spend. That call is advisory: when it fails, `weekly` is null and `status` stays whatever the session call reported.
 - `lastUpdated` is the current polling attempt timestamp. On a non-`ok` attempt, the Poller carries forward prior windows and `fableAccess`, so the windows can be older than `lastUpdated`.
 - `retryAt` is set by the Poller for `throttled` and `auth_error`. `stale` and generic `error` retry on the normal provider TTL and normally have `null` here.
 - A fresh process returns an empty `accounts` array until enabled accounts complete their first staggered attempts.
@@ -151,9 +160,9 @@ Severity is computed at response time:
 
 There is no input-domain validation before this calculation. Values below zero, above 100, or non-finite internal values are not normalized safely.
 
-Accounts are sorted descending by the maximum utilization among `session`, `weekly`, and `fable`; missing windows count below all numeric values. `weeklyOpus` is intentionally absent from this server sort. Ties retain the store's insertion order. The Usage browser then groups Claude before Codex and re-sorts within each group by the nearest weekly-class reset (see [Usage guide](usage.md)); the server order is not preserved in the UI.
+Accounts are sorted descending by the maximum utilization among `session`, `weekly`, and `fable`; missing windows count below all numeric values. `weeklyOpus` is intentionally absent from this server sort. Ties retain the store's insertion order. The Usage browser then groups Claude, then Codex, then Grok, re-sorting within each group by the nearest weekly-class reset (see [Usage guide](usage.md)); the server order is not preserved in the UI.
 
-Configured provider polling defaults are 180 seconds for Claude and 60 seconds for Codex. The server exposes them for stale display logic; it does not promise that an upstream attempt occurs exactly at that cadence because initial staggering, the five-second heartbeat, sequential due-account fetches, throttling backoff, and auth pauses apply.
+Configured provider polling defaults are 180 seconds for Claude and 60 seconds for Codex and Grok. The server exposes them for stale display logic; it does not promise that an upstream attempt occurs exactly at that cadence because initial staggering, the five-second heartbeat, sequential due-account fetches, throttling backoff, and auth pauses apply.
 
 The browser currently requests immediately and then every fixed 30 seconds. Although it reads `uiRefreshSeconds`, assigning the value after the first response does not replace the already-created interval. Therefore non-default `uiRefreshSeconds` is metadata in the current UI, not an effective live timer setting.
 
@@ -283,6 +292,73 @@ Scanning failures are isolated where possible. Each failed Claude home, Codex ho
 | `500` | `{"error":"sessions failed","detail":"..."}` | Sessions provider throws outside its isolated scan paths |
 
 The response contains sensitive local paths, account/project metadata, IDs, PIDs, and executable resume text. Loopback is not authentication; do not publish or proxy it.
+
+## `GET /api/burn`
+
+Answers "which local session burned this account's five-hour window", for Claude and Codex accounts. `account` is required and is a configured `accountId`.
+
+```ts
+interface BurnSession {
+  id: string;                 // Claude session UUID (transcript file name), or Codex `session_id`
+  cwd: string | null;
+  project: string | null;     // cwd leaf
+  share: number;              // percent of this account's weighted total in the window
+  weight: number;
+  replies: number;
+  inputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  models: string[];           // most-used first
+  host: string | null;        // machine the row was read from; null = the dashboard's own
+  firstAt: string;
+  lastAt: string;
+  contested: boolean;
+}
+
+interface BurnResponse {
+  accountId: string;
+  accountLabel: string;
+  windowStart: string;
+  resetsAt: string | null;
+  windowHours: number;        // 5
+  sessions: BurnSession[];    // heaviest first
+  totals: { weight: number; replies: number; inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number };
+  otherSessions: number;      // transcripts active in the window owned by another account
+  generatedAt: string;
+  partial: boolean;
+  warnings: string[];
+}
+```
+
+### Burn semantics
+
+- Every number is a **local estimate** derived from the provider's own local session files — Claude Code transcripts, or Codex rollouts. The provider publishes one percentage per window and never says which session produced it; `share` is a share of subtrack's own weighting, not of the provider's quota. Never present it as provider accounting.
+- Sessions are ranked by a cost-shaped weight: `input + 1.25 × cacheWrite + 0.1 × cacheRead + 5 × output`. The raw components are returned so a reader can reweigh them.
+- The window is `resetsAt − windowHours` from the account's latest `/api/usage` snapshot. With no snapshot (or an unknown reset) it falls back to a rolling five hours and reports `resetsAt: null`.
+- Claude attribution uses per-home state that is **not** shared between homes: `session-env/<sessionId>/` and `history.jsonl`. The transcript store itself is one physical directory shared by every home (each home's `projects/` is a junction), so a transcript alone cannot name an account.
+- About one in ten session IDs is claimed by several homes because the session was resumed under another account. The claim with the freshest evidence (last prompt in that home's `history.jsonl`, else the `session-env` directory mtime) wins the whole session; when a losing claim also falls inside the window the row is returned with `contested: true`. Splitting one session between two accounts is not possible locally.
+- Only `readonly` Claude accounts are analysed by the Claude scanner. Subtrack-owned homes contain usage probes rather than interactive work, and Grok has no local session store at all; those requests return an empty `sessions` list with an explanatory warning instead of a guess.
+- Codex accounts are answered by a separate scanner over `<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl`. Those stores are per-home, so `contested` is always `false`; the ambiguity there is the opposite one, and is handled by identity rather than by claims:
+  - a card's subscription is the ChatGPT account id in its home's `auth.json`, and candidate homes are discovered under `~/.codex`, `~/.codex-homes/*`, `~/.subtrack/codex-homes/*`, plus every configured Codex `credentialsHome`. A store therefore counts for a card because the two share a login, not because the card was configured with that path;
+  - a store reachable from homes of two different logins is skipped, with a warning when it holds work inside the window, rather than being split;
+  - a row is keyed by the rollout's `session_id`, so a session and every subagent thread it spawned are one row;
+  - token sums come from `token_usage_record` where the CLI writes it and from `event_msg/token_count` `last_token_usage` otherwise, never both, and `inputTokens` excludes the cached part that Codex folds into its own `input_tokens`;
+  - only the `YYYY/MM/DD` folders the window can touch are opened;
+  - every ssh target in `codexRemotes` is scanned for the same window and its rows are merged in with `host` set. A host that fails or answers with anything but JSON adds a warning and leaves the rest of the response intact; one scan per host and window is shared by all cards.
+- `otherSessions` counts session files active in the window inside stores that belong to another login.
+- Only transcripts whose mtime is at or after the window start are opened, and only the file tail that can contain the window is read (grown from 1 MiB, capped at 64 MiB, which appends a warning).
+- Successful responses are cached in-process for 30 seconds per `accountId` + `resetsAt`; simultaneous misses share one scan. A rolled window is a different cache key, never a stale hit.
+
+| HTTP status | Body | Condition |
+| --- | --- | --- |
+| `200` | `BurnResponse` | Scan succeeds, including an empty or partial result with warnings |
+| `400` | `{"error":"account query parameter required"}` | `account` missing |
+| `405` | `{"error":"method not allowed"}` plus `Allow: GET` | Request method is not `GET` |
+| `503` | `{"error":"burn unavailable"}` | `createApp()` was constructed without a burn provider |
+| `500` | `{"error":"burn failed","detail":"..."}` | Burn provider throws |
+
+Responses carry `Cache-Control: no-store` and contain sensitive local paths and session IDs, exactly like `/api/sessions`.
 
 ## `GET /api/services`
 

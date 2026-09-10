@@ -1,12 +1,14 @@
 # subtrack
 
-`subtrack` is a local, Windows-first dashboard for monitoring multiple Claude and Codex subscriptions, finding the work sessions behind many open windows, and inspecting supporting local jobs.
+`subtrack` is a local, Windows-first dashboard for people who run several Claude, Codex and Grok subscriptions at once. It shows how much of every five-hour and weekly limit is left, keeps a cheat sheet of the commands you use to drive those accounts, and gives a long-running local job a place on the screen.
 
-It has three views:
+The tab bar has three views:
 
-- **Usage** shows the current 5-hour session and 7-day limits for every enabled account, plus Claude-only Opus and Fable windows when the provider reports them.
-- **Sessions** shows existing local Claude and Codex work sessions by account, project, exact working directory, title, ID, and activity, plus live Claude windows when Windows process metadata can be correlated. Resume buttons copy a PowerShell command; they do not launch or mutate a session.
-- **Services** is a local Ops Cockpit for configured Windows Scheduled Tasks, processes, ports, and HTTP health checks. When `~/.subtrack/hermes.json` is present, it also shows the always-on Hermes fleet/auth monitor and its safe auto-heal state.
+- **Usage** shows the current 5-hour session and 7-day limits for every enabled account, plus Claude-only Opus and Fable windows when the provider reports them. Cards are grouped by provider and sorted by the nearest weekly reset. A rate-limited account waits exactly as long as the provider's `Retry-After` asks and says so on the card, keeping the last real numbers visible.
+- **Commands** is a searchable cheat sheet of the shell commands behind the panel: the subtrack CLI out of the box, plus whatever launcher verbs you add to `web/commands.js`. Click a row to copy it; the "quiz me" switch hides the explanations so you can drill them.
+- **Conveyor** renders `~/.autopase-conveyor-status.json`, a small JSON status file an external pipeline can write (task, phase, timeline, links), so a long-running local job is visible next to the limits it burns.
+
+Two more pages are served but kept out of the tab bar: `/sessions.html` lists existing local Claude and Codex work sessions by account, project, working directory, title, ID and activity, with live Claude windows correlated on Windows (resume buttons copy a PowerShell command; they never launch or mutate a session), and `/services.html` is a local Ops Cockpit for configured Windows Scheduled Tasks, processes, ports and HTTP health checks, showing the always-on Hermes fleet/auth monitor when `~/.subtrack/hermes.json` is present.
 
 ## Boundaries
 
@@ -22,6 +24,7 @@ It has three views:
 - Node.js 24 and npm.
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) for an interactive Claude-owned login, or a Claude setup token for static-token mode.
 - [Codex CLI](https://developers.openai.com/codex/cli/) for Codex accounts.
+- For Grok (SuperGrok) accounts: no CLI needed, only a logged-in grok.com browser tab to copy the session cookie from.
 - A modern browser with JavaScript modules enabled.
 
 The foreground dashboard can run without the Windows installer. Persistent Sessions discovery still works where the local stores are readable, but live Claude-window correlation, Services collection/actions, and always-on integration are Windows-specific.
@@ -65,6 +68,14 @@ Pipe a Claude setup token through stdin so it does not appear in the command lin
 claude setup-token | npx tsx src/cli.ts add-account claude-static --provider claude --static-token --label "Claude static"
 ```
 
+Add a Grok (SuperGrok) account — grok.com has no CLI login, so the credential is the browser session cookie:
+
+```powershell
+npx tsx src/cli.ts add-account grok-main --provider grok --label "Grok main"
+```
+
+The first run prints where to paste the cookie (`~\.subtrack\grok-homes\<id>\cookie.txt`): in a logged-in grok.com tab press F12 → Network → refresh → click any grok.com request → copy the `cookie` request header value into that file, then re-run the same command. Subtrack only ever reads the file; when grok.com rejects the cookie the card shows `auth_error` until you re-copy it.
+
 See the [user guide](docs/usage.md) before choosing between owned, read-only, and static-token credentials. In particular, Claude refresh tokens rotate and must have only one writer.
 
 ## Optional Hermes fleet monitor
@@ -81,7 +92,7 @@ Only a confirmed missing runtime can trigger auto-heal. It requires two failed c
 | Foreground without opening a browser | `npx tsx src/cli.ts serve --no-open` |
 | One-shot account table | `npm run check` |
 | List accounts | `npx tsx src/cli.ts list` |
-| Add an account | `npx tsx src/cli.ts add-account <id> --provider claude\|codex` |
+| Add an account | `npx tsx src/cli.ts add-account <id> --provider claude\|codex\|grok` |
 | Rename a label | `npx tsx src/cli.ts rename <id> "<new label>"` |
 | Remove account metadata | `npx tsx src/cli.ts remove-account <id>` |
 | Install/remove always-on mode | `npx tsx src/cli.ts install` / `npx tsx src/cli.ts uninstall` |
