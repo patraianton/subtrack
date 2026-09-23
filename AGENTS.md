@@ -4,13 +4,15 @@ This file guides Codex agents working in this repository. Preserve any surroundi
 
 ## Project contract
 
-`subtrack` is an always-on local dashboard with three current surfaces:
+`subtrack` is an always-on local dashboard with five current surfaces:
 
 - **Usage** shows live five-hour and weekly limits across multiple Claude and Codex accounts.
+- **Commands** is a searchable cheat sheet of the shell commands behind the panel (`web/commands.js`); click a row to copy it.
+- **Windows** (`/fleet.html`, `src/fleet/`) lists every herdr pane running Claude with its folder, activity, idle time and account home, and the care mode (`auto` / `warm` / `off` / `ever`) that tells the external cache warmer and idle-compaction watchdog how to treat it.
 - **Sessions** reads existing local Claude/Codex session metadata and, on Windows, correlates live Claude processes with accounts, projects, working directories, and resume commands.
 - **Services** shows a live Windows Task Scheduler, listener, and selected-process snapshot and offers explicit local task actions.
 
-Usage and Services response snapshots are process-local and live-only. Sessions reads provider-owned history already on disk but keeps only metadata caches of its own; it does not persist transcripts, prompts, messages, tool output, command lines, or environments. There is no subtrack usage/session history database, trends database, Projects/Cleanup view, or interactive-window watchdog. Configuration, provider-owned session stores, credential files, the Services manifest, and daemon logs do persist locally. Historical specs under `docs/superpowers/` are context, not current behavior. Use [Architecture](docs/architecture.md) and [HTTP API](docs/api.md) as the canonical implementation guides.
+Usage and Services response snapshots are process-local and live-only. Sessions reads provider-owned history already on disk but keeps only metadata caches of its own; it does not persist transcripts, prompts, messages, tool output, command lines, or environments. There is no subtrack usage/session history database, trends database, Projects/Cleanup view, or interactive-window watchdog of its own (the Windows tab only records care marks for external tools). Configuration, provider-owned session stores, credential files, the Services manifest, and daemon logs do persist locally. Historical specs under `docs/superpowers/` are context, not current behavior. Use [Architecture](docs/architecture.md) and [HTTP API](docs/api.md) as the canonical implementation guides.
 
 The project runs Node 24 TypeScript directly through `tsx`; there is no build output. Imports intentionally include `.ts` extensions. Runtime dependencies are `@napi-rs/keyring` and `open`.
 

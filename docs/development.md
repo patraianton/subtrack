@@ -307,7 +307,7 @@ Keep documentation changes reviewable:
 - use concrete defaults and units, but link to the owning configuration section rather than duplicating large schemas;
 - never include access tokens, refresh tokens, credential JSON, personal emails, or raw process command lines;
 - keep CommonMark blank lines around headings, lists, tables, and fenced blocks;
-- update canonical docs when a contract changes; `claudedocs/agent-outputs/` audit artifacts are evidence and handoff material, not the primary user contract;
+- update canonical docs when a contract changes;
 - verify every relative link and command manually when no documentation linter is configured.
 
 ## Current development limits
