@@ -68,10 +68,23 @@ test('serves the Commands cheat-sheet page and module with the expected MIME typ
   });
 });
 
-test('every page links to the Commands tab', async () => {
-  for (const name of ['index.html', 'sessions.html', 'services.html', 'conveyor.html', 'commands.html']) {
+test('serves the Windows page and module with the expected MIME types', async () => {
+  await withServer(webDir, async (port) => {
+    const page = await fetch(`http://127.0.0.1:${port}/fleet.html`);
+    const js = await fetch(`http://127.0.0.1:${port}/fleet.js`);
+
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type') ?? '', /text\/html/);
+    assert.equal(js.status, 200);
+    assert.match(js.headers.get('content-type') ?? '', /javascript/);
+  });
+});
+
+test('every page links to the Commands and Windows tabs', async () => {
+  for (const name of ['index.html', 'sessions.html', 'services.html', 'conveyor.html', 'commands.html', 'fleet.html']) {
     const html = await readFile(join(webDir, name), 'utf8');
     assert.ok(html.includes('href="/commands.html"'), `${name} has no Commands tab link`);
+    assert.ok(html.includes('href="/fleet.html"'), `${name} has no Windows tab link`);
   }
 });
 

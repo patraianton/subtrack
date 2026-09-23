@@ -1,6 +1,6 @@
 # Usage and CLI guide
 
-This guide covers installing and running subtrack, managing Claude and Codex accounts, reading the Usage, Sessions, and Services pages, and interpreting command results. Configuration-file fields belong in the [configuration reference](configuration.md); discovery and recovery procedures belong in [operations](operations.md).
+This guide covers installing and running subtrack, managing Claude and Codex accounts, reading the Usage, Windows, Sessions, and Services pages, and interpreting command results. Configuration-file fields belong in the [configuration reference](configuration.md); discovery and recovery procedures belong in [operations](operations.md).
 
 ## Requirements
 
@@ -308,6 +308,25 @@ After normalization, the poller applies these schedules:
 Any non-`ok` result carries forward the previous session, weekly, Opus, Fable, and Fable-access values. Its status, error, retry time, and `lastUpdated` describe the **new attempt**, so the carried windows may be older than that timestamp.
 
 The UI may also dim a card when its timestamp is older than twice the provider interval. That visual age heuristic is separate from the `stale` credential status.
+
+## Windows page
+
+The Windows tab answers "which of my Claude windows will be touched next, and which ones should be left alone?". It is served at `/fleet.html` and reads `/api/fleet`.
+
+One row per herdr pane that is running Claude, longest idle first: folder, pane id, what the agent is doing, idle time, the account home the window burns, four care buttons, and one line saying what the idle-compaction watchdog would do next round. The row also carries the window title and, when there is one, the mark's age and the last compaction the watchdog recorded (red when it failed).
+
+The four buttons are the modes of the `ccmode` shell function:
+
+| Button | Meaning |
+|---|---|
+| `auto` | No mark. The general rule applies: the cache warmer warms the window if you worked there in the last six hours, and the watchdog compacts it after about an hour idle. |
+| `warm` | Keep the cache warm, never compact. |
+| `off` | Leave the window completely alone: no warming, no compaction. Use it for monitors and long development sessions. |
+| `ever` | Forever window: always warm, and cleared with a handover once the context fills up. |
+
+What this page does **not** do: nothing here compacts, warms, clears, or types into a window. Clicking a button only rewrites one row of `~/.claude/idle-handover/window-modes.json`; the external Scheduled Tasks `claude-window-care` and `claude-idle-compact` read that file on their own rounds and act on it. The same mark can be set from inside a window with `ccmode off` in PowerShell, or with the `/ccmode off` slash command in Claude Code. A mark is keyed on the herdr pane, so it stays with that window and not with the folder.
+
+The page refreshes every 15 seconds and caches nothing; each refresh shells out to `herdr pane list` once. If herdr is not running, the page says so instead of showing an empty fleet as a fact.
 
 ## Sessions page
 

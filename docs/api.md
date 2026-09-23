@@ -1,6 +1,6 @@
 # subtrack HTTP API
 
-This is the complete current HTTP contract implemented by `src/server.ts`, `src/sessions/`, and `src/ops/`. It is a local implementation reference, not a versioned, official, public, or remotely safe API.
+This is the complete current HTTP contract implemented by `src/server.ts`, `src/sessions/`, `src/ops/`, and `src/fleet/`. It is a local implementation reference, not a versioned, official, public, or remotely safe API.
 
 For system ownership and data flow, see [Architecture](architecture.md). Service-manifest input is documented in [Configuration](configuration.md), and the action/probe trust boundary is documented in [Security](security.md).
 
@@ -13,8 +13,8 @@ For system ownership and data flow, see [Architecture](architecture.md). Service
 - The router ignores the query string. For example, `/api/usage?x=1` routes as `/api/usage`.
 - JSON responses use `content-type: application/json; charset=utf-8`.
 - `/api/health`, `/api/usage`, and `/api/services` are conventionally read with `GET`, but the current router does not enforce their method and returns the same response for any method.
-- `/api/sessions` enforces `GET`. Other methods return JSON `405`, `Allow: GET`, and `Cache-Control: no-store`.
-- Only `POST /api/services/action` is recognized as an action route. Other methods for routes other than `/api/sessions` fall through to static-file lookup and normally return `404 not found`, not `405 Method Not Allowed`.
+- `/api/sessions` and `/api/fleet` enforce `GET`. Other methods return JSON `405`, `Allow: GET`, and `Cache-Control: no-store`.
+- `POST /api/services/action` and `POST /api/fleet/mode` are the only action routes. Other methods for routes other than `/api/sessions` fall through to static-file lookup and normally return `404 not found`, not `405 Method Not Allowed`.
 - Unknown routes and missing static files return `404` with plain text `not found`. A static path that fails the normalized web-root boundary returns `403` with plain text `forbidden`.
 
 ## Endpoint summary
@@ -28,6 +28,8 @@ For system ownership and data flow, see [Architecture](architecture.md). Service
 | `GET` | `/api/burn?account=<id>` | `BurnResponse` | No |
 | `GET` by convention | `/api/services` | `ServicesResponse` | No, except first request can seed `services.json` |
 | `POST` | `/api/services/action` | `ActionResult` | Yes |
+| `GET` | `/api/fleet` | `FleetResponse` | No |
+| `POST` | `/api/fleet/mode` | `SetModeResult` | Yes, rewrites `window-modes.json` |
 
 ## Common scalar types and enums
 
@@ -45,6 +47,8 @@ type WindowBinding = 'launch' | 'likely' | 'ambiguous' | 'unknown';
 type ServiceKind = 'task' | 'process' | 'port' | 'http' | 'hermes';
 type ServiceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 type ServiceAction = 'restart' | 'stop' | 'register';
+
+type WindowMode = 'ever' | 'warm' | 'off';
 ```
 
 The server trusts internal types more than it validates runtime data. In particular, service configuration can inject unsupported values and the action endpoint casts parsed JSON without schema validation. Consumers should not treat these enums as an input-validation guarantee.
@@ -604,6 +608,83 @@ The action body is accumulated as a JavaScript string. The limit is `1,000,000` 
 | `503` | `{"error":"actions unavailable"}` | `createApp()` has no action handler |
 
 An empty body is parsed as `{}` and reaches the handler as an unknown action. There is no `422` schema error and no `405` response for a wrong method.
+
+## `GET /api/fleet`
+
+One row per herdr pane that is running a Claude agent, joined with subtrack's own activity and quota view, the care mark a human pinned on that window, and the last compaction the external watchdog recorded. Read-only. Always `Cache-Control: no-store`; there is no server-side cache, so each request re-runs `herdr pane list`.
+
+```ts
+interface FleetWindow {
+  paneId: string;              // herdr pane, e.g. "w85:p1" — the identity a mark is keyed on
+  workspaceId: string | null;
+  folder: string;              // from the session record, else the cwd's last segment
+  cwd: string;                 // no trailing separator
+  title: string | null;        // terminal title, stripped
+  agentStatus: string;         // herdr's own word: 'working' | 'idle' | 'done' | ...
+  sessionId: string | null;
+  lastActivity: string | null; // ISO-8601, from /api/sessions
+  idleMinutes: number | null;
+  accountId: string | null;    // 'claude-default' records fall back to the folder's live window
+  accountLabel: string | null;
+  mode: WindowMode | null;     // null means no mark: the general rule applies
+  markScope: 'pane' | 'folder' | null;
+  markedAt: string | null;     // 'yyyy-MM-dd HH:mm' as ccmode wrote it
+  lastCompactAt: string | null;
+  lastCompactFailed: boolean;
+  compactable: boolean;        // what the external watchdog would do next round
+  reason: string;
+}
+
+interface FleetResponse {
+  windows: FleetWindow[];      // longest idle first
+  generatedAt: string;
+  warnings: string[];
+  idleWindowMinutes: { min: number; max: number };
+}
+```
+
+| HTTP status | Body | Condition |
+| --- | --- | --- |
+| `200` | `FleetResponse` | Normal, including a degraded one |
+| `405` | `{"error":"method not allowed"}`, `Allow: GET` | Any other method |
+| `500` | `{"error":"fleet failed","detail":"..."}` | Provider throws |
+| `503` | `{"error":"fleet unavailable"}` | `createApp()` has no fleet provider |
+
+### Fleet semantics
+
+- herdr owns the pane list. An unreachable or silent herdr yields `windows: []` plus a warning, never a `500`; a failing `/api/sessions` likewise degrades to a warning, leaving panes with `idleMinutes: null`.
+- `compactable` and `reason` mirror the thresholds of the external `claude-idle-compact` watchdog (`~/.claude/hooks/idle-compact-watch.ps1`): marked `off`, `working`, unknown activity, an account without headroom, idle under 55 minutes, and idle over 24 hours are all reasons it would skip. Subtrack itself never compacts, warms, or writes to a window.
+- Account headroom comes from the same in-process snapshots `/api/usage` serves: non-`ok` status or a session/weekly window at 99 percent or more.
+
+## `POST /api/fleet/mode`
+
+Pins, changes, or removes one window's care mark. The request body is JSON:
+
+```ts
+interface SetModeRequest {
+  pane?: string | null;              // herdr pane id; preferred identity
+  cwd?: string;                      // used when there is no pane
+  mode: WindowMode | 'auto';         // 'auto' removes the mark
+}
+
+interface SetModeResult { ok: boolean; mode: WindowMode | 'auto'; pane: string | null; cwd: string }
+```
+
+| HTTP status | Body | Condition |
+| --- | --- | --- |
+| `200` | `SetModeResult` | Mark written |
+| `400` | `{"error":"bad json"}` | Body is not valid JSON |
+| `400` | `{"error":"mode must be ever, warm, off or auto"}` | Unknown mode |
+| `400` | `{"error":"pane or cwd required"}` | Neither identity supplied |
+| `403` | `{"error":"forbidden (cross-origin)"}` | Present Origin fails the same policy as the services action |
+| `413` | `{"error":"payload too large"}` | Body exceeds 1,000,000 characters |
+| `503` | `{"error":"fleet unavailable"}` | `createApp()` has no handler |
+
+### Mode semantics
+
+- The marks live in `~/.claude/idle-handover/window-modes.json`, shared with the `ccmode` shell function and read by both the cache warmer (`claude-window-care`) and the idle-compaction watchdog. Subtrack rewrites the whole file, always as a JSON array without a BOM, preserving every other row.
+- A pane-keyed mark replaces only that pane's row. A paneless (folder-keyed) mark covers every paneless window of that folder, exactly as `ccmode` treats a window outside herdr.
+- Nothing applies the mark synchronously: the watchdogs read the file on their own rounds.
 
 ## Security and privacy warnings
 

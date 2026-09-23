@@ -18,6 +18,9 @@ import type { SessionsResponse } from './sessions/types.ts';
 import { makeGetSessions } from './sessions/scan.ts';
 import type { BurnResponse } from './burn/types.ts';
 import { makeGetBurn } from './burn/scan.ts';
+import type { FleetResponse, SetModeRequest, SetModeResult } from './fleet/types.ts';
+import { makeGetFleet, makeSetWindowMode } from './fleet/fleet.ts';
+import { makeHerdrRunner } from './fleet/panes.ts';
 import { makeRemoteScanner, makeSshRunner } from './burn/remote.ts';
 import { HermesFleetMonitor } from './hermes/monitor.ts';
 import { HermesMonitorSupervisor } from './hermes/supervisor.ts';
@@ -40,7 +43,7 @@ export function enrichUsage(u: NormalizedUsage): EnrichedUsage {
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
-export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: SubtrackConfig['pollIntervalSeconds']; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult>; getSessions?: () => Promise<SessionsResponse>; getBurn?: (accountId: string, resetsAt: string | null) => Promise<BurnResponse> }): Server {
+export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: SubtrackConfig['pollIntervalSeconds']; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult>; getSessions?: () => Promise<SessionsResponse>; getBurn?: (accountId: string, resetsAt: string | null) => Promise<BurnResponse>; getFleet?: () => Promise<FleetResponse>; setWindowMode?: (req: SetModeRequest) => Promise<SetModeResult> }): Server {
   return createServer(async (req, res) => {
     const raw = req.url ?? '/';
     const url = raw.split('?')[0]!;
@@ -49,10 +52,7 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
         if (!opts.runServiceAction) { safeWrite(res, 503, { error: 'actions unavailable' }); return; }
         // CSRF defense: this endpoint changes system state. A cross-origin browser POST carries an
         // Origin that won't match our loopback origin; reject it. Non-browser clients send no Origin.
-        const origin = req.headers.origin;
-        const host = req.headers.host ?? '';
-        const originOk = !origin || origin === `http://${host}` || /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin);
-        if (!originOk) { safeWrite(res, 403, { error: 'forbidden (cross-origin)' }); return; }
+        if (!sameOrigin(req)) { safeWrite(res, 403, { error: 'forbidden (cross-origin)' }); return; }
         let bodyText: string;
         try { bodyText = await readBody(req); }
         catch (e) { safeWrite(res, (e as { tooLarge?: boolean }).tooLarge ? 413 : 400, { error: (e as { tooLarge?: boolean }).tooLarge ? 'payload too large' : 'bad request' }); return; }
@@ -61,6 +61,27 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
         catch { safeWrite(res, 400, { error: 'bad json' }); return; }
         try { return json(res, await opts.runServiceAction(parsed)); }
         catch (e) { safeWrite(res, 500, { error: 'action failed', detail: String((e as Error).message) }); return; }
+      }
+      if (req.method === 'POST' && url === '/api/fleet/mode') {
+        const noStore = { 'cache-control': 'no-store' };
+        if (!opts.setWindowMode) { safeWrite(res, 503, { error: 'fleet unavailable' }, noStore); return; }
+        // Same CSRF defense as the services action: this writes a file other watchdogs obey.
+        if (!sameOrigin(req)) { safeWrite(res, 403, { error: 'forbidden (cross-origin)' }, noStore); return; }
+        let bodyText: string;
+        try { bodyText = await readBody(req); }
+        catch (e) { safeWrite(res, (e as { tooLarge?: boolean }).tooLarge ? 413 : 400, { error: (e as { tooLarge?: boolean }).tooLarge ? 'payload too large' : 'bad request' }, noStore); return; }
+        let parsed: SetModeRequest;
+        try { parsed = JSON.parse(bodyText || '{}') as SetModeRequest; }
+        catch { safeWrite(res, 400, { error: 'bad json' }, noStore); return; }
+        try { return json(res, await opts.setWindowMode(parsed), noStore); }
+        catch (e) { safeWrite(res, 400, { error: String((e as Error).message) }, noStore); return; }
+      }
+      if (url === '/api/fleet') {
+        const noStore = { 'cache-control': 'no-store' };
+        if (req.method !== 'GET') { safeWrite(res, 405, { error: 'method not allowed' }, { ...noStore, allow: 'GET' }); return; }
+        if (!opts.getFleet) { safeWrite(res, 503, { error: 'fleet unavailable' }, noStore); return; }
+        try { return json(res, await opts.getFleet(), noStore); }
+        catch (e) { safeWrite(res, 500, { error: 'fleet failed', detail: String((e as Error).message) }, noStore); return; }
       }
       if (url === '/api/health') return json(res, { ok: true });
       if (url === '/api/conveyor') {
@@ -127,11 +148,36 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
   });
 }
 
+/**
+ * Claude accounts with no room left for a compaction run: a /compact prices the whole conversation
+ * through the model, so on an exhausted account it just fails. Mirrors the watchdog's own check.
+ */
+export function blockedAccounts(store: SnapshotStore): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const a of store.all()) {
+    if (a.provider !== 'claude') continue;
+    if (a.status !== 'ok') { out.set(a.accountId, a.status); continue; }
+    const worst = Math.max(a.weekly?.utilization ?? 0, a.session?.utilization ?? 0);
+    if (worst >= 99) out.set(a.accountId, 'limit spent');
+  }
+  return out;
+}
+
 function maxUtil(u: EnrichedUsage): number {
   return Math.max(u.session?.utilization ?? -1, u.weekly?.utilization ?? -1, u.fable?.utilization ?? -1);
 }
 function byTightest(a: EnrichedUsage, b: EnrichedUsage): number {
   return maxUtil(b) - maxUtil(a);
+}
+
+/**
+ * CSRF defense for state-changing endpoints: a cross-origin browser POST carries an Origin that
+ * won't match our loopback origin. Non-browser clients send no Origin and are allowed through.
+ */
+function sameOrigin(req: import('node:http').IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  const host = req.headers.host ?? '';
+  return !origin || origin === `http://${host}` || /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin);
 }
 
 function json(res: ServerResponse, body: unknown, headers: Record<string, string> = {}): void {
@@ -184,7 +230,11 @@ export async function serve(base: string = homedir(), opts: { open?: boolean } =
     remotes: codexRemotes,
     scanRemote: codexRemotes.length > 0 ? makeRemoteScanner(makeSshRunner()) : undefined,
   });
-  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction, getSessions, getBurn });
+  // The window fleet surface: herdr owns the pane list, subtrack owns activity and quota, and the
+  // marks file is shared with the `ccmode` shell function. Subtrack still compacts nothing itself.
+  const getFleet = makeGetFleet({ base, run: makeHerdrRunner(base), getSessions, blockedAccounts: () => blockedAccounts(store) });
+  const setWindowMode = makeSetWindowMode({ base });
+  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction, getSessions, getBurn, getFleet, setWindowMode });
   // Reject (rather than hang) if the port is taken — the daemon supervisor reacts to the non-zero exit.
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => reject(err);
