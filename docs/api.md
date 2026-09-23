@@ -14,7 +14,7 @@ For system ownership and data flow, see [Architecture](architecture.md). Service
 - JSON responses use `content-type: application/json; charset=utf-8`.
 - `/api/health`, `/api/usage`, and `/api/services` are conventionally read with `GET`, but the current router does not enforce their method and returns the same response for any method.
 - `/api/sessions` and `/api/fleet` enforce `GET`. Other methods return JSON `405`, `Allow: GET`, and `Cache-Control: no-store`.
-- `POST /api/services/action` and `POST /api/fleet/mode` are the only action routes. Other methods for routes other than `/api/sessions` fall through to static-file lookup and normally return `404 not found`, not `405 Method Not Allowed`.
+- `POST /api/services/action`, `POST /api/fleet/mode` and `POST /api/fleet/focus` are the only action routes. Other methods for routes other than `/api/sessions` fall through to static-file lookup and normally return `404 not found`, not `405 Method Not Allowed`.
 - Unknown routes and missing static files return `404` with plain text `not found`. A static path that fails the normalized web-root boundary returns `403` with plain text `forbidden`.
 
 ## Endpoint summary
@@ -30,6 +30,7 @@ For system ownership and data flow, see [Architecture](architecture.md). Service
 | `POST` | `/api/services/action` | `ActionResult` | Yes |
 | `GET` | `/api/fleet` | `FleetResponse` | No |
 | `POST` | `/api/fleet/mode` | `SetModeResult` | Yes, rewrites `window-modes.json` |
+| `POST` | `/api/fleet/focus` | `FocusResult` | Yes, switches the herdr client and raises its window |
 
 ## Common scalar types and enums
 
@@ -685,6 +686,39 @@ interface SetModeResult { ok: boolean; mode: WindowMode | 'auto'; pane: string |
 - The marks live in `~/.claude/idle-handover/window-modes.json`, shared with the `ccmode` shell function and read by both the cache warmer (`claude-window-care`) and the idle-compaction watchdog. Subtrack rewrites the whole file, always as a JSON array without a BOM, preserving every other row.
 - A pane-keyed mark replaces only that pane's row. A paneless (folder-keyed) mark covers every paneless window of that folder, exactly as `ccmode` treats a window outside herdr.
 - Nothing applies the mark synchronously: the watchdogs read the file on their own rounds.
+
+## `POST /api/fleet/focus`
+
+Opens one window: switches the herdr client to that pane's workspace and tab, then brings the terminal window hosting herdr to the front. This is the only way subtrack touches a window at all — it still never types into one, compacts it, or clears it.
+
+```ts
+interface FocusRequest { pane: string }                 // herdr pane id, e.g. "w62:p1"
+
+interface FocusResult {
+  ok: boolean;
+  pane: string;
+  workspaceId: string | null;
+  raised: boolean;                                      // terminal window came to the front
+  warning: string | null;                               // partial success, e.g. tab not focused
+}
+```
+
+| HTTP status | Body | Condition |
+| --- | --- | --- |
+| `200` | `FocusResult` | Workspace switched; `raised`/`warning` report the rest |
+| `400` | `{"error":"bad json"}` | Body is not valid JSON |
+| `400` | `{"error":"pane required, e.g. w62:p1"}` | Missing or malformed pane id |
+| `400` | `{"error":"herdr has no pane w99:p1"}` | The id is not in the live pane list |
+| `400` | `{"error":"herdr could not focus w85: ..."}` | herdr refused the workspace switch |
+| `403` | `{"error":"forbidden (cross-origin)"}` | Present Origin fails the same policy as the other action routes |
+| `413` | `{"error":"payload too large"}` | Body exceeds 1,000,000 characters |
+| `503` | `{"error":"fleet unavailable"}` | `createApp()` has no handler |
+
+### Focus semantics
+
+- The pane id is checked twice: by shape (`<workspace>:<pane>`, alphanumerics only) and against the live `herdr pane list`. An unknown id is a `400`, never a command.
+- Raising the terminal is best-effort and Windows-specific: the window is found by herdr's own `HUB:` title, then by falling back to Windows Terminal, and focused through an `AttachThreadInput` + `SetForegroundWindow` pair because Windows grants foreground rights only to the process owning the current input. A herdr client hosted elsewhere simply returns `raised: false`; the workspace switch already happened.
+- A tab that will not focus is a warning, not an error: the operator is already on the right workspace.
 
 ## Security and privacy warnings
 

@@ -20,6 +20,8 @@ export interface ModeMark {
 export interface HerdrPane {
   paneId: string;
   workspaceId: string | null;
+  /** The tab holding the pane; focusing a window means focusing its workspace and then this tab. */
+  tabId: string | null;
   agent: string;
   agentStatus: string;
   cwd: string;
@@ -70,4 +72,18 @@ export interface SetModeResult {
   mode: WindowMode | 'auto';
   pane: string | null;
   cwd: string;
+}
+
+export interface FocusRequest {
+  /** herdr pane id, e.g. `w62:p1`. */
+  pane: string;
+}
+
+export interface FocusResult {
+  ok: boolean;
+  pane: string;
+  workspaceId: string | null;
+  /** Whether the terminal window hosting herdr was also brought to the front. */
+  raised: boolean;
+  warning: string | null;
 }

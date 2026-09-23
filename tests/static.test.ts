@@ -72,11 +72,16 @@ test('serves the Windows page and module with the expected MIME types', async ()
   await withServer(webDir, async (port) => {
     const page = await fetch(`http://127.0.0.1:${port}/fleet.html`);
     const js = await fetch(`http://127.0.0.1:${port}/fleet.js`);
+    // Both the Windows tab and the Usage breakdown import the care buttons from here, so a
+    // missing /modes.js would break two pages at once with nothing but a console error.
+    const modes = await fetch(`http://127.0.0.1:${port}/modes.js`);
 
     assert.equal(page.status, 200);
     assert.match(page.headers.get('content-type') ?? '', /text\/html/);
     assert.equal(js.status, 200);
     assert.match(js.headers.get('content-type') ?? '', /javascript/);
+    assert.equal(modes.status, 200);
+    assert.match(modes.headers.get('content-type') ?? '', /javascript/);
   });
 });
 

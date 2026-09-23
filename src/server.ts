@@ -18,8 +18,9 @@ import type { SessionsResponse } from './sessions/types.ts';
 import { makeGetSessions } from './sessions/scan.ts';
 import type { BurnResponse } from './burn/types.ts';
 import { makeGetBurn } from './burn/scan.ts';
-import type { FleetResponse, SetModeRequest, SetModeResult } from './fleet/types.ts';
+import type { FleetResponse, FocusRequest, FocusResult, SetModeRequest, SetModeResult } from './fleet/types.ts';
 import { makeGetFleet, makeSetWindowMode } from './fleet/fleet.ts';
+import { makeFocusWindow } from './fleet/focus.ts';
 import { makeHerdrRunner } from './fleet/panes.ts';
 import { makeRemoteScanner, makeSshRunner } from './burn/remote.ts';
 import { HermesFleetMonitor } from './hermes/monitor.ts';
@@ -43,7 +44,7 @@ export function enrichUsage(u: NormalizedUsage): EnrichedUsage {
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
-export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: SubtrackConfig['pollIntervalSeconds']; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult>; getSessions?: () => Promise<SessionsResponse>; getBurn?: (accountId: string, resetsAt: string | null) => Promise<BurnResponse>; getFleet?: () => Promise<FleetResponse>; setWindowMode?: (req: SetModeRequest) => Promise<SetModeResult> }): Server {
+export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefreshSeconds: number; pollIntervalSeconds: SubtrackConfig['pollIntervalSeconds']; getServices?: () => Promise<ServicesResponse>; runServiceAction?: (req: ActionRequest) => Promise<ActionResult>; getSessions?: () => Promise<SessionsResponse>; getBurn?: (accountId: string, resetsAt: string | null) => Promise<BurnResponse>; getFleet?: () => Promise<FleetResponse>; setWindowMode?: (req: SetModeRequest) => Promise<SetModeResult>; focusWindow?: (req: FocusRequest) => Promise<FocusResult> }): Server {
   return createServer(async (req, res) => {
     const raw = req.url ?? '/';
     const url = raw.split('?')[0]!;
@@ -74,6 +75,20 @@ export function createApp(store: SnapshotStore, opts: { webDir: string; uiRefres
         try { parsed = JSON.parse(bodyText || '{}') as SetModeRequest; }
         catch { safeWrite(res, 400, { error: 'bad json' }, noStore); return; }
         try { return json(res, await opts.setWindowMode(parsed), noStore); }
+        catch (e) { safeWrite(res, 400, { error: String((e as Error).message) }, noStore); return; }
+      }
+      if (req.method === 'POST' && url === '/api/fleet/focus') {
+        const noStore = { 'cache-control': 'no-store' };
+        if (!opts.focusWindow) { safeWrite(res, 503, { error: 'fleet unavailable' }, noStore); return; }
+        // Same CSRF defense: this one moves the operator's screen.
+        if (!sameOrigin(req)) { safeWrite(res, 403, { error: 'forbidden (cross-origin)' }, noStore); return; }
+        let bodyText: string;
+        try { bodyText = await readBody(req); }
+        catch (e) { safeWrite(res, (e as { tooLarge?: boolean }).tooLarge ? 413 : 400, { error: (e as { tooLarge?: boolean }).tooLarge ? 'payload too large' : 'bad request' }, noStore); return; }
+        let parsed: FocusRequest;
+        try { parsed = JSON.parse(bodyText || '{}') as FocusRequest; }
+        catch { safeWrite(res, 400, { error: 'bad json' }, noStore); return; }
+        try { return json(res, await opts.focusWindow(parsed), noStore); }
         catch (e) { safeWrite(res, 400, { error: String((e as Error).message) }, noStore); return; }
       }
       if (url === '/api/fleet') {
@@ -232,9 +247,11 @@ export async function serve(base: string = homedir(), opts: { open?: boolean } =
   });
   // The window fleet surface: herdr owns the pane list, subtrack owns activity and quota, and the
   // marks file is shared with the `ccmode` shell function. Subtrack still compacts nothing itself.
-  const getFleet = makeGetFleet({ base, run: makeHerdrRunner(base), getSessions, blockedAccounts: () => blockedAccounts(store) });
+  const herdr = makeHerdrRunner(base);
+  const getFleet = makeGetFleet({ base, run: herdr, getSessions, blockedAccounts: () => blockedAccounts(store) });
   const setWindowMode = makeSetWindowMode({ base });
-  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction, getSessions, getBurn, getFleet, setWindowMode });
+  const focusWindow = makeFocusWindow({ run: herdr, pwsh: runPwsh });
+  const server = createApp(store, { webDir, uiRefreshSeconds: cfg.uiRefreshSeconds, pollIntervalSeconds: cfg.pollIntervalSeconds, getServices, runServiceAction, getSessions, getBurn, getFleet, setWindowMode, focusWindow });
   // Reject (rather than hang) if the port is taken — the daemon supervisor reacts to the non-zero exit.
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => reject(err);
