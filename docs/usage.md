@@ -293,7 +293,7 @@ A window with no local activity says so rather than showing an empty box.
 
 Default provider polling intervals are 180 seconds per Claude account and 60 seconds per Codex or Grok account. Initial accounts are staggered seven seconds apart, and a five-second heartbeat checks which account is due. Due accounts are fetched sequentially, with no overlapping poller tick.
 
-Within one provider attempt, transient transport errors and HTTP 5xx responses are retried up to three total attempts with approximately 400 ms and 800 ms delays. HTTP 4xx responses return immediately. `Retry-After` is not currently honored. Claude also performs one extra credential read/refresh attempt after a 401 when its credential mode permits it.
+Within one provider attempt, transient transport errors and HTTP 5xx responses are retried up to three total attempts with approximately 400 ms and 800 ms delays. HTTP 4xx responses return immediately. A `Retry-After` header that asks for longer than the backoff step is honored, capped at 60 minutes (see the table below). Claude also performs one extra credential read/refresh attempt after a 401 when its credential mode permits it.
 
 After normalization, the poller applies these schedules:
 
@@ -324,9 +324,15 @@ The four buttons are the modes of the `ccmode` shell function:
 | `off` | Leave the window completely alone: no warming, no compaction. Use it for monitors and long development sessions. |
 | `ever` | Forever window: always warm, and cleared with a handover once the context fills up. |
 
+Clicking anywhere else on a row opens that window: herdr switches to its workspace and tab and the terminal comes to the front. The care buttons inside the row keep their own meaning, so a click on one only sets the mark.
+
 What this page does **not** do: nothing here compacts, warms, clears, or types into a window. Clicking a button only rewrites one row of `~/.claude/idle-handover/window-modes.json`; the external Scheduled Tasks `claude-window-care` and `claude-idle-compact` read that file on their own rounds and act on it. The same mark can be set from inside a window with `ccmode off` in PowerShell, or with the `/ccmode off` slash command in Claude Code. A mark is keyed on the herdr pane, so it stays with that window and not with the folder.
 
 The page refreshes every 15 seconds and caches nothing; each refresh shells out to `herdr pane list` once. If herdr is not running, the page says so instead of showing an empty fleet as a fact.
+
+### The same controls on the Usage page
+
+Clicking a Claude `session` bar opens the breakdown of which sessions burned that window (see above). Every row there whose window is still open gets the same two controls: click the row to jump to that window in herdr, and use the four small buttons on the right to set its care mark — no need to open the Windows tab for a window you can already see. A row is matched to a window by its session id, or by a folder exactly one window occupies; rows with no live window (closed since, or Codex work from the Mac or Hetzner) stay inert.
 
 ## Sessions page
 
