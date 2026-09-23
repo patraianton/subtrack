@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createApp } from '../src/server.ts';
 import { SnapshotStore } from '../src/snapshotStore.ts';
-import type { FleetResponse, SetModeRequest, SetModeResult } from '../src/fleet/types.ts';
+import type { FleetResponse, FocusRequest, FocusResult, SetModeRequest, SetModeResult } from '../src/fleet/types.ts';
 
 const EMPTY: FleetResponse = { windows: [], generatedAt: '2026-09-23T10:00:00.000Z', warnings: [], idleWindowMinutes: { min: 55, max: 1440 } };
 
 async function withServer(
-  opts: { getFleet?: () => Promise<FleetResponse>; setWindowMode?: (r: SetModeRequest) => Promise<SetModeResult> },
+  opts: {
+    getFleet?: () => Promise<FleetResponse>;
+    setWindowMode?: (r: SetModeRequest) => Promise<SetModeResult>;
+    focusWindow?: (r: FocusRequest) => Promise<FocusResult>;
+  },
   fn: (base: string) => Promise<void>,
 ) {
   const app = createApp(new SnapshotStore(), { webDir: process.cwd(), uiRefreshSeconds: 30, pollIntervalSeconds: { claude: 180, codex: 60, grok: 60 }, ...opts });
@@ -36,6 +40,40 @@ test('/api/fleet is 405 for non-GET and 503 with no provider', async () => {
   await withServer({}, async (base) => {
     assert.equal((await fetch(`${base}/api/fleet`)).status, 503);
     assert.equal((await fetch(`${base}/api/fleet/mode`, { method: 'POST', body: '{}' })).status, 503);
+    assert.equal((await fetch(`${base}/api/fleet/focus`, { method: 'POST', body: '{}' })).status, 503);
+  });
+});
+
+test('POST /api/fleet/focus opens a window and reports a refusal as 400', async () => {
+  const seen: FocusRequest[] = [];
+  const focusWindow = async (r: FocusRequest): Promise<FocusResult> => {
+    seen.push(r);
+    if (r.pane === 'nope') throw new Error('herdr has no pane nope');
+    return { ok: true, pane: r.pane, workspaceId: 'w85', raised: true, warning: null };
+  };
+  await withServer({ focusWindow }, async (base) => {
+    const ok = await fetch(`${base}/api/fleet/focus`, { method: 'POST', body: JSON.stringify({ pane: 'w85:p1' }) });
+    assert.equal(ok.status, 200);
+    assert.equal((await ok.json() as FocusResult).raised, true);
+    assert.equal(seen[0]?.pane, 'w85:p1');
+
+    const bad = await fetch(`${base}/api/fleet/focus`, { method: 'POST', body: JSON.stringify({ pane: 'nope' }) });
+    assert.equal(bad.status, 400);
+    assert.match((await bad.json() as { error: string }).error, /no pane nope/);
+  });
+});
+
+// Focusing moves the operator's screen, so the same origin check as the mark endpoint applies.
+test('POST /api/fleet/focus rejects a cross-origin browser call', async () => {
+  let called = 0;
+  await withServer({ focusWindow: async (r) => { called++; return { ok: true, pane: r.pane, workspaceId: null, raised: false, warning: null }; } }, async (base) => {
+    const res = await fetch(`${base}/api/fleet/focus`, {
+      method: 'POST',
+      headers: { origin: 'https://evil.example' },
+      body: JSON.stringify({ pane: 'w85:p1' }),
+    });
+    assert.equal(res.status, 403);
+    assert.equal(called, 0);
   });
 });
 

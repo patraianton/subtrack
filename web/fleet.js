@@ -1,11 +1,6 @@
-const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+import { focusWindow, modeButtons, setWindowMode } from './modes.js';
 
-const MODES = [
-  ['auto', 'auto', 'General rule: warmed while you worked here recently, compacted after an hour idle.'],
-  ['warm', 'warm', 'Keep the cache warm, never compact.'],
-  ['off', 'off', 'Leave this window completely alone — no warming, no compaction.'],
-  ['ever', 'ever', 'Forever window: always warm, and cleared with a handover once the context fills up.'],
-];
+const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export function formatIdle(minutes) {
   if (minutes === null || minutes === undefined) return '—';
@@ -15,14 +10,6 @@ export function formatIdle(minutes) {
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
-function modeButtons(w) {
-  const current = w.mode ?? 'auto';
-  return MODES.map(([mode, text, title]) => {
-    const on = mode === current ? ' on' : '';
-    return `<button class="fl-mode${on}" data-pane="${esc(w.paneId)}" data-cwd="${esc(w.cwd)}" data-mode="${mode}" title="${esc(title)}">${esc(text)}</button>`;
-  }).join('');
-}
-
 function row(w) {
   const marked = w.mode
     ? `marked ${esc(w.mode)}${w.markScope === 'folder' ? ' (whole folder)' : ''}${w.markedAt ? ` · ${esc(w.markedAt)}` : ''}`
@@ -30,7 +17,9 @@ function row(w) {
   const compacted = w.lastCompactAt
     ? `<span class="fl-note${w.lastCompactFailed ? ' bad' : ''}">last compaction ${esc(String(w.lastCompactAt).replace('T', ' '))}${w.lastCompactFailed ? ' — failed' : ''}</span>`
     : '';
-  return `<div class="fl-row${w.compactable ? ' due' : ''}">`
+  // The row itself is the way into the window: a click switches herdr to this pane and raises the
+  // terminal. The care buttons sit inside the row, so the handler skips clicks that land on one.
+  return `<div class="fl-row go${w.compactable ? ' due' : ''}" data-focus="${esc(w.paneId)}" title="open this window in herdr">`
     + `<span class="fl-folder">${esc(w.folder)}</span>`
     + `<span class="fl-pane">${esc(w.paneId)}</span>`
     + `<span class="fl-status s-${esc(w.agentStatus)}">${esc(w.agentStatus)}</span>`
@@ -79,22 +68,28 @@ if (typeof document !== 'undefined') {
   }
 
   el.addEventListener('click', async (ev) => {
+    if (busy) return;
     const btn = ev.target.closest('button.fl-mode');
-    if (!btn || busy) return;
-    busy = true;
-    btn.parentElement.querySelectorAll('button.fl-mode').forEach((b) => b.classList.toggle('on', b === btn));
+    if (btn) {
+      busy = true;
+      btn.parentElement.querySelectorAll('button.fl-mode').forEach((b) => b.classList.toggle('on', b === btn));
+      try {
+        await setWindowMode({ pane: btn.dataset.pane, cwd: btn.dataset.cwd, mode: btn.dataset.mode });
+      } catch (e) {
+        updated.textContent = `could not set mode (${e.message})`;
+      } finally {
+        busy = false;
+        await refresh();
+      }
+      return;
+    }
+    const go = ev.target.closest('.fl-row[data-focus]');
+    if (!go) return;
     try {
-      const res = await fetch('/api/fleet/mode', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ pane: btn.dataset.pane, cwd: btn.dataset.cwd, mode: btn.dataset.mode }),
-      });
-      if (!res.ok) updated.textContent = `could not set mode (${res.status})`;
-    } catch {
-      updated.textContent = 'could not set mode';
-    } finally {
-      busy = false;
-      await refresh();
+      const r = await focusWindow(go.dataset.focus);
+      if (r.warning) updated.textContent = r.warning;
+    } catch (e) {
+      updated.textContent = `could not open the window (${e.message})`;
     }
   });
 

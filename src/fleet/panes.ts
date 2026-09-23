@@ -59,6 +59,7 @@ export function parsePanes(stdout: string): HerdrPane[] {
     out.push({
       paneId,
       workspaceId: typeof r.workspace_id === 'string' ? r.workspace_id : null,
+      tabId: typeof r.tab_id === 'string' ? r.tab_id : null,
       agent: typeof r.agent === 'string' ? r.agent : '',
       agentStatus: typeof r.agent_status === 'string' ? r.agent_status : 'unknown',
       cwd: typeof r.cwd === 'string' ? r.cwd : '',

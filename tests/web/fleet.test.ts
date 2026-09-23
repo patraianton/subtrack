@@ -50,6 +50,14 @@ test('renderFleet marks the current mode button and defaults to auto', () => {
   assert.match(ai, /marked off \(|marked off ·/);
 });
 
+test('every row carries the pane it opens, and the header row does not', () => {
+  const html = renderFleet(data);
+  assert.match(html, /class="fl-row go[^"]*" data-focus="w85:p1"/);
+  assert.match(html, /data-focus="w3H:p1"/);
+  const head = html.split('class="fl-row').find((r) => r.includes('fl-head'))!;
+  assert.doesNotMatch(head, /data-focus/);
+});
+
 test('renderFleet escapes window titles and reports an empty fleet', () => {
   assert.ok(!renderFleet(data).includes('<script>'));
   const empty = renderFleet({ ...data, windows: [], warnings: ['herdr returned no panes'] });

@@ -2,6 +2,8 @@
 // Shares are a LOCAL ESTIMATE from transcripts; the provider only publishes the window percentage.
 // Everything here is plain string building so it stays testable outside a browser.
 
+import { modeButtons } from './modes.js';
+
 const esc = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -33,7 +35,27 @@ function clock(value) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function burnRow(session, now) {
+const normCwd = (v) => String(v ?? '').replace(/[\\/]+$/, '').toLowerCase();
+
+/**
+ * The live herdr window a burn row belongs to, or null. The session id is the honest match; after
+ * a `/clear` the window runs a new session the transcript does not know about, so a folder match
+ * is the fallback — but only when exactly one window sits in that folder, because worktrees and
+ * split panes make "same folder" ambiguous and jumping to the wrong window is worse than no jump.
+ * Codex rows carry a `host`: that work ran on another machine and has no window here.
+ */
+export function paneFor(windows, session) {
+  if (!Array.isArray(windows) || windows.length === 0 || session.host) return null;
+  const byId = session.id ? windows.find((w) => w.sessionId === session.id) : null;
+  if (byId) return byId;
+  const cwd = normCwd(session.cwd);
+  if (!cwd) return null;
+  const sameFolder = windows.filter((w) => normCwd(w.cwd) === cwd);
+  return sameFolder.length === 1 ? sameFolder[0] : null;
+}
+
+/** @param {{ paneId: string, cwd: string, mode?: string|null } | null} [pane] the live herdr window, if any */
+export function burnRow(session, now, pane = null) {
   const models = session.models.slice(0, 2).map(shortModel).join(', ') || '—';
   // Codex sessions usually ran on another machine; say which, or the folder name means nothing.
   const where = session.host ? `<span class="burn-host">${esc(session.host)}</span> ` : '';
@@ -46,15 +68,26 @@ export function burnRow(session, now) {
   const flag = session.contested
     ? '<span class="burn-flag" title="also run under another account inside this window — the split cannot be proven locally">?</span>'
     : '';
-  return `<div class="burn-row" title="${esc(session.cwd ?? '')}\n${esc(session.id)}">`
+  // A row whose window is still open doubles as the way into it: clicking jumps herdr to that pane,
+  // and the care buttons pin the same mark the Windows tab and `ccmode` write. Rows with no live
+  // window (closed since, or run on another machine) stay inert.
+  const attrs = pane
+    ? ` class="burn-row live" data-pane="${esc(pane.paneId)}" data-cwd="${esc(pane.cwd)}"`
+    : ' class="burn-row"';
+  const hint = pane ? 'click to open this window in herdr\n' : '';
+  const care = pane ? `<span class="burn-care">${modeButtons(pane)}</span>` : '';
+  return `<div${attrs} title="${hint}${esc(session.cwd ?? '')}\n${esc(session.id)}">`
     + `<span class="burn-share">${share}%</span>`
     + `<span class="burn-bar"><span style="width:${Math.min(share, 100)}%"></span></span>`
     + `<span class="burn-what">${where}${esc(shortPath(session.cwd))}${flag}</span>`
-    + `<span class="burn-meta">${esc(models)} · ${Number(session.replies) || 0} replies · ${esc(when)}</span></div>`;
+    + `<span class="burn-meta">${esc(models)} · ${Number(session.replies) || 0} replies · ${esc(when)}</span>${care}</div>`;
 }
 
-/** `state` is undefined | {loading} | {error} | {data}. */
-export function renderBurn(state, now) {
+/**
+ * `state` is undefined | {loading} | {error} | {data}; `windows` are the live herdr panes from
+ * /api/fleet, used only to decide which rows can be jumped to and marked.
+ */
+export function renderBurn(state, now, windows = []) {
   if (!state || state.loading) return '<div class="burn"><div class="burn-note">reading local transcripts…</div></div>';
   if (state.error) return `<div class="burn"><div class="burn-note err">${esc(state.error)}</div></div>`;
   const data = state.data;
@@ -62,7 +95,7 @@ export function renderBurn(state, now) {
     const why = data.warnings.length ? data.warnings.join(' · ') : 'no local session activity in this window';
     return `<div class="burn"><div class="burn-note">${esc(why)}</div></div>`;
   }
-  const rows = data.sessions.slice(0, TOP_ROWS).map((session) => burnRow(session, now)).join('');
+  const rows = data.sessions.slice(0, TOP_ROWS).map((session) => burnRow(session, now, paneFor(windows, session))).join('');
   const rest = data.sessions.slice(TOP_ROWS);
   const restShare = Math.round(rest.reduce((sum, session) => sum + session.share, 0));
   const more = rest.length

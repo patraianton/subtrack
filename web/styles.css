@@ -44,7 +44,12 @@ h1 { font-size: 18px; margin: 0; }
 .gauge.clickable:focus-visible { outline: 1px solid var(--muted); outline-offset: 3px; border-radius: 4px; }
 .caret { margin-left: 6px; opacity: 0.7; }
 .burn { margin: 2px 0 10px; padding: 6px 8px; border-radius: 6px; background: rgba(127,127,127,0.08); }
-.burn-row { display: grid; grid-template-columns: 34px 46px 1fr; grid-template-areas: 'share bar what' '. . meta'; align-items: center; gap: 2px 8px; font-size: 12px; padding: 3px 0; }
+.burn-row { display: grid; grid-template-columns: 34px 46px 1fr auto; grid-template-areas: 'share bar what care' '. . meta care'; align-items: center; gap: 2px 8px; font-size: 12px; padding: 3px 0; }
+/* A row whose herdr window is still open: clicking it opens that window. */
+.burn-row.live { cursor: pointer; border-radius: 5px; }
+.burn-row.live:hover { background: #161b22; }
+.burn-care { grid-area: care; display: flex; gap: 2px; }
+.burn-care .fl-mode { padding: 2px 5px; font-size: 10px; }
 .burn-row.muted { opacity: 0.6; }
 .burn-share { grid-area: share; text-align: right; font-variant-numeric: tabular-nums; }
 .burn-bar { grid-area: bar; height: 6px; border-radius: 3px; background: #21262d; overflow: hidden; }
@@ -193,6 +198,9 @@ h1 { font-size: 18px; margin: 0; }
 .fl-warn { color: var(--warn); font-size: 12.5px; margin: 0 0 10px; }
 .fl-row { display: grid; grid-template-columns: minmax(150px, 1fr) 78px 74px 62px 74px 210px minmax(180px, 1fr); grid-template-areas: 'folder pane status idle acc modes reason' 'title title title title meta meta meta'; align-items: center; gap: 2px 12px; padding: 8px 11px; border: 1px solid #21262d; border-radius: 8px; background: var(--card); margin-bottom: 5px; }
 .fl-row.due { border-color: #3d4a2a; }
+/* The row is the way into the window; the care buttons inside it keep their own cursor. */
+.fl-row.go { cursor: pointer; }
+.fl-row.go:hover { border-color: #3c4652; }
 .fl-head { background: none; border: none; color: var(--muted); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; padding-bottom: 0; margin-bottom: 2px; }
 .fl-folder { grid-area: folder; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-pane { grid-area: pane; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; }

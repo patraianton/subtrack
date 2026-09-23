@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { burnRow, burnSupported, renderBurn, shortModel, shortPath } from '../../web/burn.js';
+import { burnRow, burnSupported, paneFor, renderBurn, shortModel, shortPath } from '../../web/burn.js';
 
 const NOW = Date.parse('2026-09-05T11:00:00.000Z');
 
@@ -99,4 +99,56 @@ test('a row from another machine says so, and a local row does not', () => {
   const now = Date.parse('2026-09-07T10:01:00.000Z');
   assert.match(burnRow({ ...base, host: 'mac' }, now), /burn-host">mac</);
   assert.doesNotMatch(burnRow({ ...base, host: null }, now), /burn-host/);
+});
+
+// --- the row as a way into the window ----------------------------------------------------------
+
+function pane(extra: Record<string, unknown> = {}) {
+  return {
+    paneId: 'w85:p1',
+    cwd: 'C:\\Users\\<user>\\projects\\acme\\reactivation-agent',
+    sessionId: 'aaaaaaaa-1111-4111-8111-111111111111',
+    mode: null,
+    ...extra,
+  };
+}
+
+test('paneFor matches a live window by session id, then by a folder only one window occupies', () => {
+  const byId = pane({ paneId: 'w10:p1', cwd: 'C:\\somewhere\\else' });
+  assert.equal(paneFor([byId], session())?.paneId, 'w10:p1', 'the session id wins over the folder');
+
+  // After /clear the window runs a session the transcript never saw; the folder is the fallback.
+  const cleared = pane({ sessionId: 'a-newer-session' });
+  assert.equal(paneFor([cleared], session())?.paneId, 'w85:p1');
+
+  // Two windows in one folder (worktrees, split panes): jumping to a guess would be worse.
+  const twin = pane({ paneId: 'w86:p1', sessionId: 'another' });
+  assert.equal(paneFor([cleared, twin], session()), null);
+
+  assert.equal(paneFor([], session()), null);
+  assert.equal(paneFor([pane()], session({ host: 'mac' })), null, 'work on another machine has no window here');
+});
+
+test('a row with a live window is clickable and carries the care buttons; one without stays inert', () => {
+  const live = burnRow(session(), NOW, pane({ mode: 'off' }));
+  assert.match(live, /class="burn-row live"/);
+  assert.match(live, /data-pane="w85:p1"/);
+  assert.match(live, /click to open this window in herdr/);
+  assert.match(live, /class="fl-mode on"[^>]*data-mode="off"/);
+
+  const inert = burnRow(session(), NOW);
+  assert.match(inert, /class="burn-row"/);
+  assert.doesNotMatch(inert, /data-pane=/);
+  assert.doesNotMatch(inert, /fl-mode/);
+});
+
+test('renderBurn wires each row to its own window', () => {
+  const rows = renderBurn(payload([session({ id: 'one' }), session({ id: 'two', cwd: 'C:\\other' })]), NOW, [
+    pane({ paneId: 'w1:p1', sessionId: 'one' }),
+    pane({ paneId: 'w2:p1', sessionId: 'two', cwd: 'C:\\other' }),
+  ]);
+  assert.match(rows, /data-pane="w1:p1"/);
+  assert.match(rows, /data-pane="w2:p1"/);
+  // With no fleet loaded the breakdown still renders, just without the jump.
+  assert.doesNotMatch(renderBurn(payload([session()]), NOW), /data-pane=/);
 });

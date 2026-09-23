@@ -1,5 +1,6 @@
 import { formatCountdown } from '/format.js';
 import { burnSupported, renderBurn } from '/burn.js';
+import { focusWindow, setWindowMode } from '/modes.js';
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -27,10 +28,27 @@ function gauge(name, w, now, opts = {}) {
 // it stays testable.
 const expanded = new Set();
 const burn = new Map(); // accountId -> { loading } | { error } | { data }
+// Live herdr panes, fetched only while a breakdown is open. They turn a burn row into a way into
+// the window itself: a click jumps there, and the care buttons pin the mark the watchdogs read.
+// Without them the rows still render, just inert — the Windows tab remains the full view.
+let fleetWindows = [];
 
 function burnBlock(u, now) {
   if (!burnSupported(u.provider) || !expanded.has(u.accountId)) return '';
-  return renderBurn(burn.get(u.accountId), now);
+  // Claude only: the fleet is a list of Claude panes, so a Codex row in the same folder would
+  // match a window that did not burn it. Codex work usually ran on the Mac or Hetzner anyway.
+  return renderBurn(burn.get(u.accountId), now, u.provider === 'claude' ? fleetWindows : []);
+}
+
+async function loadFleet() {
+  // Every call shells out to herdr, so it only runs while an open breakdown can use it.
+  if (!accountsSnapshot.some((u) => u.provider === 'claude' && expanded.has(u.accountId))) { fleetWindows = []; return; }
+  try {
+    const res = await fetch('/api/fleet', { cache: 'no-store' });
+    fleetWindows = res.ok ? (await res.json()).windows ?? [] : [];
+  } catch {
+    fleetWindows = [];
+  }
 }
 
 async function loadBurn(accountId) {
@@ -133,11 +151,35 @@ async function toggleBurn(accountId) {
   if (expanded.has(accountId)) { expanded.delete(accountId); render(); return; }
   expanded.add(accountId);
   render();                       // show the "reading…" placeholder immediately
-  await loadBurn(accountId);
+  await Promise.all([loadBurn(accountId), loadFleet()]);
   render();
 }
 
+async function markWindow(btn) {
+  btn.parentElement.querySelectorAll('button.fl-mode').forEach((b) => b.classList.toggle('on', b === btn));
+  try {
+    await setWindowMode({ pane: btn.dataset.pane, cwd: btn.dataset.cwd, mode: btn.dataset.mode });
+  } catch (e) {
+    updatedEl.textContent = `could not set mode (${e.message})`;
+  }
+  await loadFleet();
+  render();
+}
+
+async function jumpTo(pane) {
+  try {
+    const r = await focusWindow(pane);
+    if (r.warning) updatedEl.textContent = r.warning;
+  } catch (e) {
+    updatedEl.textContent = `could not open the window (${e.message})`;
+  }
+}
+
 cardsEl.addEventListener('click', (event) => {
+  const mode = event.target.closest('button.fl-mode');
+  if (mode) { void markWindow(mode); return; }
+  const row = event.target.closest('.burn-row[data-pane]');
+  if (row) { void jumpTo(row.dataset.pane); return; }
   const target = event.target.closest('[data-burn]');
   if (target) void toggleBurn(target.dataset.burn);
 });
@@ -162,7 +204,7 @@ async function refresh() {
     updatedEl.textContent = `updated ${new Date().toLocaleTimeString()}`;
     // Keep any open breakdown live too; the server caches it, so this is cheap.
     if (expanded.size) {
-      await Promise.all([...expanded].map((accountId) => loadBurn(accountId)));
+      await Promise.all([...[...expanded].map((accountId) => loadBurn(accountId)), loadFleet()]);
       render();
     }
   } catch {

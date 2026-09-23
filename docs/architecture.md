@@ -252,12 +252,16 @@ The weight is `input + 1.25 × cacheWrite + 0.1 × cacheRead + 5 × output`. It 
 herdr pane list -> Claude panes -> join with /api/sessions activity, Usage headroom,
    window-modes.json marks and idle-compact state.json -> /api/fleet -> web/fleet.js
                                    mode button -> POST /api/fleet/mode -> window-modes.json
+                                   row click   -> POST /api/fleet/focus -> herdr workspace/tab
+                                                  + raise the terminal window
 ```
 
 - The pane list is authoritative for which windows exist and what each one is doing. Subtrack's own session records supply last activity, folder, and account home; a record that reports `claude-default` takes the home of the live window in the same folder, because a session started after a `/clear` does not know its own home.
 - `~/.claude/idle-handover/window-modes.json` is shared state, not a subtrack file. `ccmode` in PowerShell writes the same rows, and two external Scheduled Tasks read them: `claude-window-care` (cache warming) and `claude-idle-compact` (idle compaction). Writes preserve every row that belongs to another window.
 - `compactable` and `reason` restate the idle-compaction watchdog's own rules so the page can explain, per window, why a window will or will not be taken next round. They are a mirror of an external script and must be kept in step with it; nothing in subtrack acts on them.
 - There is no cache on this surface and no background work: each request shells out to herdr once.
+- The same two controls sit on the Usage page: while a session breakdown is open, `web/app.js` also fetches `/api/fleet` and matches each burn row to a live pane — by session id, else by a folder exactly one window occupies — so the rows that still have a window can be opened and marked without leaving the page. An unmatched row simply stays inert.
+- Focusing is the only thing subtrack does *to* a window. It switches the herdr client and raises the hosting terminal; it never sends keys, compacts, warms, or clears.
 
 ## Module ownership and dependency-injection seams
 
@@ -291,11 +295,13 @@ herdr pane list -> Claude panes -> join with /api/sessions activity, Usage headr
 | `src/fleet/modes.ts` | The shared `window-modes.json` format: parse, mark lookup, mark replacement, write | Base home |
 | `src/fleet/panes.ts` | `herdr pane list` acquisition and envelope parsing | `HerdrRunner`, herdr binary location |
 | `src/fleet/fleet.ts` | Pane/session/mark/compaction join, watchdog verdict, mark writes | Base home, herdr runner, Sessions provider, blocked-account source, clock |
+| `src/fleet/focus.ts` | Opening a window: workspace/tab focus and raising the terminal | `HerdrRunner`, `PwshRunner` |
 | `src/hermes/config.ts` | Validated `hermes.json` loading | Base home |
 | `src/hermes/probe.ts`, `windows.ts` | Profile discovery, PID/state/platform/auth checks, live auth probe | Filesystem, PowerShell, fetch, clock |
 | `src/hermes/monitor.ts` | Background scheduling, canaries, hysteresis, safe restart, state/events/webhooks, public Services rows | Timers, filesystem, PowerShell, fetch, restart/canary commands |
 | `src/hermes/supervisor.ts` | Post-bind initialization, visible failure row, and bounded initialization retry | Monitor factory, timer, clock |
 | `web/app.js`, `web/sessions.js`, `web/services.js`, `web/fleet.js` | Browser rendering, local polling, copy controls, confirmations, mode buttons | Same-origin HTTP API |
+| `web/modes.js` | The care buttons and the two window actions, shared by the Windows tab and the Usage breakdown | Same-origin HTTP API |
 | `src/install.ts`, `daemon.ts` | Windows startup registration and serve-child supervision | Base home; most process/system calls are concrete |
 
 ## Server, installer, and daemon topology
