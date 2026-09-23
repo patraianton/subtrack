@@ -2,7 +2,7 @@
 // Shares are a LOCAL ESTIMATE from transcripts; the provider only publishes the window percentage.
 // Everything here is plain string building so it stays testable outside a browser.
 
-import { modeButtons } from './modes.js';
+import { modeButtons, modeLegend } from './modes.js';
 
 const esc = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -95,7 +95,10 @@ export function renderBurn(state, now, windows = []) {
     const why = data.warnings.length ? data.warnings.join(' · ') : 'no local session activity in this window';
     return `<div class="burn"><div class="burn-note">${esc(why)}</div></div>`;
   }
-  const rows = data.sessions.slice(0, TOP_ROWS).map((session) => burnRow(session, now, paneFor(windows, session))).join('');
+  const top = data.sessions.slice(0, TOP_ROWS).map((session) => ({ session, pane: paneFor(windows, session) }));
+  const rows = top.map(({ session, pane }) => burnRow(session, now, pane)).join('');
+  // The legend belongs to the buttons: no live window here means no buttons to explain.
+  const legend = top.some(({ pane }) => pane) ? modeLegend() : '';
   const rest = data.sessions.slice(TOP_ROWS);
   const restShare = Math.round(rest.reduce((sum, session) => sum + session.share, 0));
   const more = rest.length
@@ -107,5 +110,5 @@ export function renderBurn(state, now, windows = []) {
     : '';
   // "local" would be a lie for Codex: those rows are usually read off the Mac or Hetzner.
   const note = `<div class="burn-note">estimate from session records · window from ${esc(clock(data.windowStart))}${other}</div>`;
-  return `<div class="burn">${rows}${more}${note}</div>`;
+  return `<div class="burn">${rows}${more}${note}${legend}</div>`;
 }
