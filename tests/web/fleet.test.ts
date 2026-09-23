@@ -12,12 +12,14 @@ const data = {
       title: 'News digest', agentStatus: 'idle', sessionId: 'sid-news', lastActivity: '2026-09-23T06:00:00.000Z',
       idleMinutes: 240, accountId: 'cc7', accountLabel: 'cc7', mode: null, markScope: null, markedAt: null,
       lastCompactAt: '2026-09-23T10:11:02', lastCompactFailed: false, compactable: true, reason: 'due on the next round',
+      workspaceLabel: 'news digest', workspaceNumber: 4, repoName: 'news', isWorktree: false, depth: 0, branch: 'main',
     },
     {
       paneId: 'w3H:p1', workspaceId: 'w3H', folder: 'ai-aoutbound', cwd: 'C:\\Users\\<user>\\projects\\ai',
       title: '<script>', agentStatus: 'working', sessionId: 'sid-ai', lastActivity: '2026-09-23T09:45:00.000Z',
       idleMinutes: 15, accountId: 'cc5', accountLabel: 'cc5', mode: 'off' as const, markScope: 'pane' as const,
       markedAt: '2026-09-01 10:46', lastCompactAt: null, lastCompactFailed: false, compactable: false, reason: 'marked off — never touched',
+      workspaceLabel: 'ai-aoutbound', workspaceNumber: 31, repoName: 'team-ops', isWorktree: true, depth: 1, branch: 'feat/2385',
     },
   ],
 };
@@ -50,9 +52,30 @@ test('renderFleet marks the current mode button and defaults to auto', () => {
   assert.match(ai, /marked off \(|marked off ·/);
 });
 
+// The page is read next to the herdr sidebar, so it draws the same shape: herdr's name for the
+// window, its branch underneath, and worktrees nested under the repo they belong to.
+test('a worktree row is nested, tagged and shows its branch', () => {
+  const html = renderFleet(data);
+  const rows = html.split('class="fl-row');
+  const repo = rows.find((r) => r.includes('w85:p1'))!;
+  const worktree = rows.find((r) => r.includes('w3H:p1'))!;
+
+  assert.match(repo, /go root/);
+  assert.match(repo, /--d:0/);
+  assert.match(repo, /fl-folder">news digest/, "herdr's own name for the window, not the folder");
+  assert.match(repo, /fl-branch">main</);
+  assert.doesNotMatch(repo, /fl-wt/);
+
+  assert.match(worktree, /go nested/);
+  assert.match(worktree, /--d:1/);
+  assert.match(worktree, /fl-tree">└/);
+  assert.match(worktree, /fl-wt[^>]*>worktree · team-ops</);
+  assert.match(worktree, /fl-branch">feat\/2385</);
+});
+
 test('every row carries the pane it opens, and the header row does not', () => {
   const html = renderFleet(data);
-  assert.match(html, /class="fl-row go[^"]*" data-focus="w85:p1"/);
+  assert.match(html, /class="fl-row go[^"]*"[^>]*data-focus="w85:p1"/);
   assert.match(html, /data-focus="w3H:p1"/);
   const head = html.split('class="fl-row').find((r) => r.includes('fl-head'))!;
   assert.doesNotMatch(head, /data-focus/);

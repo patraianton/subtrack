@@ -313,7 +313,7 @@ The UI may also dim a card when its timestamp is older than twice the provider i
 
 The Windows tab answers "which of my Claude windows will be touched next, and which ones should be left alone?". It is served at `/fleet.html` and reads `/api/fleet`.
 
-One row per herdr pane that is running Claude, longest idle first: folder, pane id, what the agent is doing, idle time, the account home the window burns, four care buttons, and one line saying what the idle-compaction watchdog would do next round. The row also carries the window title and, when there is one, the mark's age and the last compaction the watchdog recorded (red when it failed).
+Rows come in the order of the herdr sidebar itself — repos in their own order, each repo's linked worktrees nested under it with a `worktree` tag and the repo's name, and the checked-out branch under every window. One row per herdr pane that is running Claude: folder, pane id, what the agent is doing, idle time, the account home the window burns, four care buttons, and one line saying what the idle-compaction watchdog would do next round. The row also carries the window title and, when there is one, the mark's age and the last compaction the watchdog recorded (red when it failed).
 
 A legend above the rows spells out all four marks and what a row click does, so the one-word buttons never need a tooltip. The four buttons are the modes of the `ccmode` shell function:
 
