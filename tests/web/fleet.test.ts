@@ -58,6 +58,18 @@ test('every row carries the pane it opens, and the header row does not', () => {
   assert.doesNotMatch(head, /data-focus/);
 });
 
+// Four one-word buttons are unreadable without a key, and a tooltip only helps someone who
+// already suspects there is one.
+test('the page explains what each mark means and what a row click does', () => {
+  const html = renderFleet(data);
+  for (const mode of ['auto', 'warm', 'off', 'ever']) {
+    assert.match(html, new RegExp(`<b>${mode}</b>`), `no legend entry for ${mode}`);
+  }
+  assert.match(html, /never compact/);
+  assert.match(html, /click a row to open that window in herdr/);
+  assert.match(html, /never compacts, warms or types/);
+});
+
 test('renderFleet escapes window titles and reports an empty fleet', () => {
   assert.ok(!renderFleet(data).includes('<script>'));
   const empty = renderFleet({ ...data, windows: [], warnings: ['herdr returned no panes'] });

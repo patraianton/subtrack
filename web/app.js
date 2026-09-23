@@ -101,7 +101,7 @@ function card(u, now) {
 }
 
 // Group cards by provider (Claude first, then Codex). Within each group the soonest weekly-class
-// reset comes first (Anton 2026-08-08: "which ones can I work with" — nearest reset on top); accounts
+// reset comes first, so the accounts you can work with soonest are on top; accounts
 // with no known reset sink to the end of their group. Session resets are ignored here — they
 // cycle every 5h and would reshuffle the grid constantly.
 const PROVIDER_ORDER = { claude: 0, codex: 1, grok: 2 };

@@ -50,6 +50,13 @@ h1 { font-size: 18px; margin: 0; }
 .burn-row.live:hover { background: #161b22; }
 .burn-care { grid-area: care; display: flex; gap: 2px; }
 .burn-care .fl-mode { padding: 2px 5px; font-size: 10px; }
+/* What the four buttons and the row click mean. Shown wherever those buttons are. */
+.mode-legend { margin-top: 7px; padding-top: 6px; border-top: 1px solid #21262d; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.mode-legend > span { display: block; }
+.mode-legend b { display: inline-block; min-width: 36px; color: var(--fg); font-weight: 600; }
+.mode-legend .lg-hint { color: var(--fg); }
+.mode-legend .lg-hint::before { content: '↵ '; color: var(--muted); }
+.mode-legend .lg-note { margin-top: 3px; font-style: italic; }
 .burn-row.muted { opacity: 0.6; }
 .burn-share { grid-area: share; text-align: right; font-variant-numeric: tabular-nums; }
 .burn-bar { grid-area: bar; height: 6px; border-radius: 3px; background: #21262d; overflow: hidden; }
@@ -194,7 +201,9 @@ h1 { font-size: 18px; margin: 0; }
 
 /* Windows tab — one row per herdr pane running Claude, with its care mark. */
 .fleet { padding: 16px 20px 40px; }
-.fl-lead { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
+.fl-lead { color: var(--muted); font-size: 12.5px; margin: 0 0 8px; }
+/* On the Windows tab the legend is a header, not a footnote under a card. */
+.fleet .mode-legend { margin: 0 0 14px; padding: 9px 11px; border: 1px solid #21262d; border-radius: 8px; background: var(--card); font-size: 11.5px; }
 .fl-warn { color: var(--warn); font-size: 12.5px; margin: 0 0 10px; }
 .fl-row { display: grid; grid-template-columns: minmax(150px, 1fr) 78px 74px 62px 74px 210px minmax(180px, 1fr); grid-template-areas: 'folder pane status idle acc modes reason' 'title title title title meta meta meta'; align-items: center; gap: 2px 12px; padding: 8px 11px; border: 1px solid #21262d; border-radius: 8px; background: var(--card); margin-bottom: 5px; }
 .fl-row.due { border-color: #3d4a2a; }

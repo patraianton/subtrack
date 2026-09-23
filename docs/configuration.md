@@ -45,7 +45,7 @@ The file is created the next time a CLI operation saves configuration.
 | uiRefreshSeconds | number | No | 30 | Intended Usage-page refresh interval in seconds. The server returns it through /api/usage. Current Usage JavaScript creates its timer before reading this value, so the page remains at 30 seconds until that client bug is fixed. |
 | pollIntervalSeconds | object | No | claude 180, codex 60, grok 60 | Per-provider normal polling TTLs in seconds. The nested object is merged over these defaults. Values are not checked for positivity or finiteness. |
 | accounts | array of AccountConfig | No | empty array | Configured accounts. A missing or null value becomes an empty array; other invalid values are not rejected during load. |
-| codexRemotes | array of string | No | empty array | ssh targets that also run Codex under the configured logins, for example `["mac", "root@10.0.0.2"]`. Used only by the Codex session breakdown (`/api/burn`), only while a card is expanded, and only to read. Empty keeps subtrack strictly local. Entries are passed to `ssh` unvalidated, so treat this list as trusted local configuration. |
+| codexRemotes | array of string | No | empty array | ssh targets that also run Codex under the configured logins, for example `["mac", "root@203.0.113.10"]`. Used only by the Codex session breakdown (`/api/burn`), only while a card is expanded, and only to read. Empty keeps subtrack strictly local. Entries are passed to `ssh` unvalidated, so treat this list as trusted local configuration. |
 
 Unknown top-level properties and unknown pollIntervalSeconds keys survive the in-memory object produced by loadConfig. They are not an endorsed extension mechanism and may not be preserved by future validated formats.
 

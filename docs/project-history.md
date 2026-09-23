@@ -107,7 +107,7 @@ A scratch native helper proved console attach, alternate-buffer read, menu navig
 
 The result remains design-only:
 
-- The [uptime-watchdog design](superpowers/specs/2026-07-12-uptime-watchdog-design.md) was written but historical evidence did not show it committed.
+- An uptime-watchdog design was written, but historical evidence did not show it committed.
 - The native helper remained in a scratch area.
 - No production watchdog or tested state machine was integrated.
 

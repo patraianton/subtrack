@@ -1,4 +1,4 @@
-import { focusWindow, modeButtons, setWindowMode } from './modes.js';
+import { focusWindow, modeButtons, modeLegend, setWindowMode } from './modes.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -47,7 +47,8 @@ export function renderFleet(data) {
   const header = '<div class="fl-row fl-head">'
     + '<span>folder</span><span>pane</span><span>state</span><span>idle</span><span>account</span><span>care</span><span>watchdog</span>'
     + '<span></span><span></span></div>';
-  return warn + head + header + windows.map(row).join('');
+  return warn + head + modeLegend('click a row to open that window in herdr; the buttons only set the mark')
+    + header + windows.map(row).join('');
 }
 
 // Browser bootstrap (skipped under node:test, which only imports the pure renderers).

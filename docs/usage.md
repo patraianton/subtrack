@@ -315,7 +315,7 @@ The Windows tab answers "which of my Claude windows will be touched next, and wh
 
 One row per herdr pane that is running Claude, longest idle first: folder, pane id, what the agent is doing, idle time, the account home the window burns, four care buttons, and one line saying what the idle-compaction watchdog would do next round. The row also carries the window title and, when there is one, the mark's age and the last compaction the watchdog recorded (red when it failed).
 
-The four buttons are the modes of the `ccmode` shell function:
+A legend above the rows spells out all four marks and what a row click does, so the one-word buttons never need a tooltip. The four buttons are the modes of the `ccmode` shell function:
 
 | Button | Meaning |
 |---|---|
@@ -332,7 +332,7 @@ The page refreshes every 15 seconds and caches nothing; each refresh shells out 
 
 ### The same controls on the Usage page
 
-Clicking a Claude `session` bar opens the breakdown of which sessions burned that window (see above). Every row there whose window is still open gets the same two controls: click the row to jump to that window in herdr, and use the four small buttons on the right to set its care mark — no need to open the Windows tab for a window you can already see. A row is matched to a window by its session id, or by a folder exactly one window occupies; rows with no live window (closed since, or Codex work from the Mac or Hetzner) stay inert.
+Clicking a Claude `session` bar opens the breakdown of which sessions burned that window (see above). Every row there whose window is still open gets the same two controls: click the row to jump to that window in herdr, and use the four small buttons on the right to set its care mark (the same legend appears under the rows) — no need to open the Windows tab for a window you can already see. A row is matched to a window by its session id, or by a folder exactly one window occupies; rows with no live window (closed since, or Codex work from the Mac or Hetzner) stay inert.
 
 ## Sessions page
 
@@ -421,7 +421,7 @@ Normal task/port/process/HTTP rows use the manifest snapshot rules below. Hermes
 - the fleet row summarizes healthy profiles and shared subscriptions;
 - one auth row per subscription validates the canonical store, pinned account/JWT identity, a live OpenAI request, and the most recent real-model canary;
 - one profile row validates PID/start time/exact command, gateway state, required Telegram state, exact canonical-store assignment, and whether the live process started after the current `.env` binding;
-- Taras-style CLI-only profiles can be healthy without Telegram when no token/platform is configured;
+- a profile that runs without Telegram (no bot token or platform configured) can still be healthy;
 - `checkedAt` is the background check time. `gateway_state.updated_at` is intentionally not used as an idle heartbeat.
 
 `up` means all required evidence passed. `degraded` means a live runtime has a recoverable/platform/upstream warning, duplicate/stale metadata, or just completed auto-heal. `down` means a confirmed missing runtime or confirmed auth/account failure. `unknown` means required evidence could not be read reliably. Two consecutive confirmed missing-runtime observations trigger the configured safe Hermes restart; ambiguous process evidence, 401/account mismatch, unsafe owner binding, or corrupt monitor state never triggers restart, canary mutation, or login.

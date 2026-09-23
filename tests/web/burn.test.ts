@@ -142,6 +142,16 @@ test('a row with a live window is clickable and carries the care buttons; one wi
   assert.doesNotMatch(inert, /fl-mode/);
 });
 
+test('the legend appears with the buttons and only with them', () => {
+  const withWindow = renderBurn(payload([session()]), NOW, [pane()]);
+  assert.match(withWindow, /<b>warm<\/b> keep the cache warm, never compact/);
+  assert.match(withWindow, /<b>off<\/b>/);
+  assert.match(withWindow, /click a row to open that window in herdr/);
+
+  // No live window means no buttons on any row, so a key to them would only be noise.
+  assert.doesNotMatch(renderBurn(payload([session()]), NOW), /mode-legend/);
+});
+
 test('renderBurn wires each row to its own window', () => {
   const rows = renderBurn(payload([session({ id: 'one' }), session({ id: 'two', cwd: 'C:\\other' })]), NOW, [
     pane({ paneId: 'w1:p1', sessionId: 'one' }),

@@ -49,7 +49,7 @@ export interface SubtrackConfig {
   pollIntervalSeconds: { claude: number; codex: number; grok: number };
   accounts: AccountConfig[];
   /**
-   * ssh targets that also run Codex under the configured logins, e.g. `["mac", "root@1.2.3.4"]`.
+   * ssh targets that also run Codex under the configured logins, e.g. `["mac", "root@203.0.113.10"]`.
    * Only the Codex session breakdown uses them, only while a card is expanded, and only to read.
    * Empty (the default) keeps subtrack strictly local.
    */
