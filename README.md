@@ -1,41 +1,53 @@
 # subtrack
 
-`subtrack` is a local, Windows-first dashboard for people who run several Claude, Codex and Grok subscriptions at once. It shows how much of every five-hour and weekly limit is left, keeps a cheat sheet of the commands you use to drive those accounts, and gives a long-running local job a place on the screen.
+subtrack is a local dashboard for one person who runs many Claude Code and Codex windows at the same time on several paid subscriptions. Each Claude and Codex subscription has a five-hour limit and a weekly limit; a SuperGrok subscription has a two-hour limit for grok-4 and a weekly limit. The agent windows use these limits up at different speeds, and subtrack exists so you can see, before starting a task, which account still has room. It checks every account every one to three minutes and shows on one page how much of each limit is left. It shows which local sessions used up an account's five-hour limit. It also lists every Claude window open in [herdr](https://github.com/herdrdev/herdr) (the terminal workspace manager that hosts the agent windows), with what it is doing and how long it has been idle. It runs on Windows, listens on 127.0.0.1 only and keeps no history database.
 
-The tab bar has four views:
+The screenshot below is the author's own setup, seven Claude and two Codex subscriptions on one screen. It was taken on 8 July 2026, before the tab bar and the sort by nearest weekly reset were added. subtrack has been in use on the author's machine since its first commit on 29 June 2026.
 
-- **Usage** shows the current 5-hour session and 7-day limits for every enabled account, plus Claude-only Opus and Fable windows when the provider reports them. Cards are grouped by provider and sorted by the nearest weekly reset. A rate-limited account waits exactly as long as the provider's `Retry-After` asks and says so on the card, keeping the last real numbers visible.
-- **Windows** lists every herdr pane running Claude, in the same order and shape as the herdr sidebar (worktrees nested under their repo, the checked-out branch under each window) — pane, what the agent is doing, how long it has been idle, and which account home it burns — and lets you pin how each window should be cared for: `warm` (keep the cache warm, never compact), `off` (leave it completely alone), `ever` (always warm, cleared with a handover when the context fills), or back to `auto`. The mark is stored in `~/.claude/idle-handover/window-modes.json`, the same file the `ccmode` shell function writes; external Scheduled Tasks read it and act on it. Clicking a row opens that window: herdr switches to it and the terminal comes to the front. The same jump and the same buttons appear on every row of the Usage breakdown whose window is still open. Subtrack itself never compacts, warms or types into a window — it only shows and edits the mark, and explains per window what the watchdog would do next.
-- **Commands** is a searchable cheat sheet of the shell commands behind the panel: the subtrack CLI out of the box, plus whatever launcher verbs you add to `web/commands.js`. Click a row to copy it; the "quiz me" switch hides the explanations so you can drill them.
-- **Conveyor** renders `~/.autopase-conveyor-status.json`, a small JSON status file an external pipeline can write (task, phase, timeline, links), so a long-running local job is visible next to the limits it burns.
+![The Usage page with seven Claude accounts and two Codex accounts](docs/assets/fable-dashboard.png)
 
-Two more pages are served but kept out of the tab bar: `/sessions.html` lists existing local Claude and Codex work sessions by account, project, working directory, title, ID and activity, with live Claude windows correlated on Windows (resume buttons copy a PowerShell command; they never launch or mutate a session), and `/services.html` is a local Ops Cockpit for configured Windows Scheduled Tasks, processes, ports and HTTP health checks, showing the always-on Hermes fleet/auth monitor when `~/.subtrack/hermes.json` is present.
+## What it does
 
-## Boundaries
+- **Usage tab.** One card per account with the five-hour limit (two hours for grok-4) and the weekly limit as percentage bars and reset countdowns; Claude cards add the separate weekly limits for the Opus and Fable models when the provider reports them. Cards are grouped by provider and sorted so the account with the nearest weekly reset comes first, and the header names the account and limit with the highest use. A rate-limited account waits as long as the provider's `Retry-After` asks, up to 60 minutes, says so on the card and keeps the last real numbers visible.
+- **Which sessions used up the five-hour limit.** Click the five-hour bar of a Codex card, or of a Claude card registered with `--readonly-home` (the Claude home your work actually runs in), and subtrack lists the sessions that used that limit: share of the limit, working directory, models used, number of replies and last activity. A Claude row whose window is still open in herdr opens that window when clicked and carries the same four mode buttons as the Windows tab below. If your Codex sessions run on other machines, list those hosts in `codexRemotes`; subtrack reads them over ssh and marks each row with the host it came from.
+- **Windows tab** (`/fleet.html`, the list of agent windows). Claude Code compacts (summarizes) a conversation when its context fills. The provider also keeps a prompt cache, a saved copy of the conversation so far that makes the next reply cheaper while it lasts. Two Scheduled Tasks of your own, not part of this repository, keep the cache of recently used windows alive and compact windows that have been idle for 55 minutes to 24 hours. The tab shows one row per herdr pane that runs Claude, longest idle first: folder, pane id, state (`working`, `idle`, `done`), idle time, the account the window runs on, and what those two tasks will do with it on their next round. Click a row to open that window: herdr switches to the pane and, when it can, subtrack brings the terminal to the front. Four buttons tell the two tasks how to treat a window: `auto` (the general rule), `warm` (keep the cache alive, never compact), `off` (leave the window alone) and `ever` (always keep the cache alive; when the context fills, the window writes a handover note and starts with a fresh context). Without herdr the tab says so; the other tabs do not depend on it.
+- **Commands tab.** A searchable cheat sheet of the shell commands you use alongside the dashboard. Click a row to copy it; a "quiz me" switch hides the explanations so you can drill the commands.
+- **Conveyor tab.** Renders `~/.autopase-conveyor-status.json`, a small status file (task, phase, timeline, links) that a long-running pipeline writes, so the job is visible next to the limits it uses up. The file name is hard-coded in `src/server.ts` after the author's own pipeline; any job can write it.
+- **Sessions and Services pages** (`/sessions.html` and `/services.html`, served but not in the tab bar). Sessions lists existing Claude and Codex work sessions by account, project and folder, matches live Claude windows to them and offers a copyable resume command. Services is a control page for the Windows Scheduled Tasks, ports and processes listed in `~/.subtrack/services.json`, with restart, stop and register buttons, plus an optional monitor for a fleet of Hermes gateways (Hermes is an open-source agent runtime; the monitored gateways run Telegram bots on shared Codex subscriptions).
+- **Always-on mode.** `install` registers a Windows Scheduled Task that starts a daemon at logon; the daemon supervises the server and restarts it after a crash.
 
-- The HTTP server binds to IPv4 loopback only: `127.0.0.1` on port `7777` by default.
-- Usage is a **live in-memory snapshot**. Sessions reads provider-owned history already present in Claude homes and Codex databases, but subtrack creates no session-history database and persists no prompts, messages, tool output, full command lines, or process environments. Configuration, provider-owned session stores, credential files, the Services manifest, daemon logs, and the small Hermes monitor state/transition log do persist independently on disk.
-- Claude and Codex credentials live in per-account files under `%USERPROFILE%\.subtrack\` unless you explicitly register an external read-only Claude home. The Windows keyring component in the repository is not on the live authentication path.
-- Access tokens are sent over HTTPS to the providers' usage endpoints. The endpoints and response schemas are unofficial, observed contracts and can change without notice.
-- Loopback binding is not authentication. Other software running locally as you may be able to read the dashboard/API. Sessions exposes local account labels, titles, project paths, session IDs, and resume commands; Services can expose task/process metadata and command lines and can trigger state-changing actions.
+## How it works
 
-## Requirements
+- **Poller** (`src/poller.ts`). Starts accounts 7 seconds apart, checks every 5 seconds which one is due and fetches them one at a time: Claude every 180 seconds, Codex and Grok every 60 seconds. After a rate-limit reply (HTTP 429) it waits 5, 10, then 15 minutes, or as long as the provider's `Retry-After` asks up to 60 minutes, and keeps the last known numbers on the card.
+- **Provider adapters** (`src/adapters/claude.ts`, `codex.ts`, `grok.ts`). Call each provider's usage endpoint with the account's own token and normalize the reply to one shape, `NormalizedUsage` in `src/types.ts`. A transient network failure or a server error (HTTP 5xx) gets up to three attempts.
+- **Credentials** (`src/auth/claude.ts`, `codex.ts`, `grok.ts`). Every account subtrack logs in itself gets its own folder under `~/.subtrack` (`claude-homes/`, `codex-homes/`, `grok-homes/`); a read-only Claude home stays where it is. A Claude account in owned mode (subtrack ran the login itself and holds the refresh token) is the only credential subtrack refreshes; a read-only Claude home, a static setup token, a Codex `auth.json` and a Grok cookie are read on every poll and never written.
+- **HTTP server** (`src/server.ts`). Plain HTTP on `127.0.0.1:7777`: JSON routes under `/api/` (listed in [docs/api.md](docs/api.md)) plus the static files in `web/`. Severity is `ok` below 70 percent, `warn` from 70 and `crit` from 90. The POST routes refuse, with HTTP 403, a request whose `Origin` header is not localhost, 127.0.0.1 or `http://` followed by the request's own `Host` header. A request without an `Origin` header passes, so this is only partial protection against other websites; see [docs/security.md](docs/security.md).
+- **Session breakdown** (`src/burn/scan.ts`, `codex.ts`, `remote.ts`, `remoteScript.ts`). For each read-only Claude home it ties each session id to one account through that home's `session-env/` and `history.jsonl`, sums `message.usage` from the transcripts modified since the five-hour limit last reset, and ranks sessions by a cost-shaped token count, `input + 1.25 × cache write + 0.1 × cache read + 5 × output`, so a session heavy on output outranks one heavy on cheap cache reads. For Codex it finds homes by account id and runs the Python scan in `remoteScript.ts` on every host in `codexRemotes` through `ssh <host> python3 -`; only summed rows come back.
+- **Sessions** (`src/sessions/scan.ts`, `windows.ts`). Reads the head and tail of Claude project JSONL files and the Codex `state_5.sqlite` database read-only, keeps only metadata, and on Windows reads each live `claude.exe` process's home and working directory to mark a session as open. Results are cached for 15 seconds.
+- **Windows tab** (`src/fleet/panes.ts`, `fleet.ts`, `modes.ts`, `focus.ts`). Runs `herdr pane list`, joins the panes with session activity and each account's remaining limit, and reads the window modes in `~/.claude/idle-handover/window-modes.json`. `POST /api/fleet/mode` rewrites one row of that file; your own Scheduled Tasks `claude-window-care` and `claude-idle-compact` read it on their rounds. Those tasks are not part of this repository; without them the buttons only write the file. `src/fleet/fleet.ts` repeats the compaction task's idle thresholds (55 minutes and 24 hours) so each row can say what that task will do. `POST /api/fleet/focus` runs `herdr workspace focus` and `herdr tab focus` for the clicked pane, then one PowerShell call tries to bring the terminal window to the front.
+- **Services** (`src/ops/windows.ts`, `services.ts`, `actions.ts`). One hidden PowerShell call captures non-Microsoft Scheduled Tasks, listening ports below 50000 and node and python processes; each entry in `~/.subtrack/services.json` is probed by task, port, HTTP or process. Results are cached for 10 seconds.
+- **Hermes monitor** (`src/hermes/monitor.ts`). A background loop every 120 seconds checks each configured Hermes gateway's process, state file, Telegram connection and account identity, and every six hours sends one real prompt through the model as a check. A restart needs two failed checks in a row, a 30-minute cooldown and at most three restarts an hour.
+- **Daemon** (`src/daemon.ts`, `src/install.ts`). The Scheduled Task `subtrack-dashboard` starts a hidden VBScript launcher, which starts the daemon; the daemon holds a PID lock, rotates the log at 5 MiB and restarts the `serve --no-open` child with a backoff of 2 to 60 seconds.
 
-- Windows 10/11 for live Claude-window correlation, the Services Ops Cockpit, and always-on Task Scheduler integration.
-- Node.js 24 and npm.
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) for an interactive Claude-owned login, or a Claude setup token for static-token mode.
+## Numbers from daily use
+
+- The screenshot above was taken with one Claude account at 100 percent of its weekly limit and the other six between 12 and 94 percent.
+- In live use a rate-limited Claude account answered with HTTP 429 and `retry-after: 1961` (33 minutes), while the poller retried after 5, 10 and 15 minutes. The poller now waits as long as the provider asks, up to 60 minutes; the change is in `src/adapters/http.ts` and `src/poller.ts` and covered by `tests/adapters/http.test.ts` and `tests/poller.test.ts`.
+
+## Run it
+
+You need:
+
+- Windows 10 or 11 for live window matching, the Services page and always-on mode.
+- Node.js 24 with npm.
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) for a Claude login, or a Claude setup token.
 - [Codex CLI](https://developers.openai.com/codex/cli/) for Codex accounts.
-- For Grok (SuperGrok) accounts: no CLI needed, only a logged-in grok.com browser tab to copy the session cookie from.
-- A modern browser with JavaScript modules enabled.
-
-The foreground dashboard can run without the Windows installer. Persistent Sessions discovery still works where the local stores are readable, but live Claude-window correlation, Services collection/actions, and always-on integration are Windows-specific.
-
-## PowerShell quick start
+- For Grok (SuperGrok), only a logged-in grok.com browser tab to copy the session cookie from.
 
 Run from the repository checkout:
 
 ```powershell
-Set-Location C:\path\to\sub-tracking
+Set-Location C:\path\to\subtrack
 npm install
 
 npx tsx src/cli.ts add-account claude-main --provider claude --label "Claude main"
@@ -44,7 +56,7 @@ npx tsx src/cli.ts add-account codex-main --provider codex --label "Codex main"
 npm start
 ```
 
-For the Claude command, complete `/login` in the isolated Claude Code window, then use `/exit` to return. The Codex command launches `codex login` in its own isolated `CODEX_HOME`.
+The Claude command starts Claude Code in the same terminal with its own config folder (`CLAUDE_CONFIG_DIR` set to `~\.subtrack\claude-homes\<id>`); run `/login` there, then type `/exit` to return to subtrack. The Codex command runs `codex login` in its own `CODEX_HOME`.
 
 Open [http://127.0.0.1:7777](http://127.0.0.1:7777). To keep it running across logons and crashes on Windows:
 
@@ -55,7 +67,7 @@ npx tsx src/cli.ts status
 
 Configuration is read once when the server starts. Restart a running dashboard after adding, renaming, or removing an account.
 
-## Account examples
+### Other ways to add an account
 
 Register an existing Claude home without letting subtrack refresh or write it:
 
@@ -69,23 +81,25 @@ Pipe a Claude setup token through stdin so it does not appear in the command lin
 claude setup-token | npx tsx src/cli.ts add-account claude-static --provider claude --static-token --label "Claude static"
 ```
 
-Add a Grok (SuperGrok) account — grok.com has no CLI login, so the credential is the browser session cookie:
+Add a Grok account. grok.com has no CLI login, so the credential is the browser session cookie:
 
 ```powershell
 npx tsx src/cli.ts add-account grok-main --provider grok --label "Grok main"
 ```
 
-The first run prints where to paste the cookie (`~\.subtrack\grok-homes\<id>\cookie.txt`): in a logged-in grok.com tab press F12 → Network → refresh → click any grok.com request → copy the `cookie` request header value into that file, then re-run the same command. Subtrack only ever reads the file; when grok.com rejects the cookie the card shows `auth_error` until you re-copy it.
+The first run prints where to paste the cookie. Then:
 
-See the [user guide](docs/usage.md) before choosing between owned, read-only, and static-token credentials. In particular, Claude refresh tokens rotate and must have only one writer.
+1. Open a logged-in grok.com tab and press F12.
+2. Open the Network panel and refresh the page.
+3. Click any grok.com request and copy the `cookie` request header value.
+4. Paste it into `~\.subtrack\grok-homes\<id>\cookie.txt`.
+5. Run the same add-account command again.
 
-## Optional Hermes fleet monitor
+subtrack only reads the file; when grok.com rejects the cookie the card shows `auth_error` until you copy it again.
 
-`~/.subtrack/hermes.json` enables a background monitor that runs even when the Services tab is closed. It auto-discovers installed profiles whose `.env` points at one of the configured shared Codex stores; names listed in `profileOverrides` form an explicit expected inventory and remain visible if a directory disappears. The monitor validates authoritative gateway PID/start-time/process identity, duplicate gateways, gateway state, required Telegram connectivity, shared account pin/JWT identity, and a live OpenAI usage probe. A small real-model canary is run on the configured representative profile for each subscription only after fail-closed ownership checks.
+Read the [user guide](docs/usage.md) before choosing between owned, read-only and static-token credentials. Claude refresh tokens rotate and must have only one writer.
 
-Only a confirmed missing runtime can trigger auto-heal. It requires two failed checks, atomically reserves the attempt before invoking Hermes, uses Hermes's own profile-scoped `gateway restart`, and observes a cooldown and hourly cap. Conflicting or incomplete Windows evidence, authentication rejection, account mismatch, or unreadable monitor state never triggers a restart, token rewrite, or automatic login. Configure optional `heartbeatUrl` and `alertWebhookUrl` for an external VPS/dead-man service; a local process cannot report that the whole PC is asleep or offline.
-
-## Command overview
+### Command overview
 
 | Task | Command |
 |---|---|
@@ -100,22 +114,41 @@ Only a confirmed missing runtime can trigger auto-heal. It requires two failed c
 | Start/stop/status/logs | `npx tsx src/cli.ts start` / `npx tsx src/cli.ts stop` / `npx tsx src/cli.ts status` / `npx tsx src/cli.ts logs` |
 | Static checks | `npm run typecheck` and `npm test` |
 
-`remove-account` changes configuration only; it does not delete credential homes. `stop` stops the current daemon process but leaves the Scheduled Task installed, so its self-heal trigger may start it again. Use `uninstall` when automatic startup must be removed, then verify with `status`.
+`remove-account` changes configuration only; it does not delete credential homes. `stop` stops the current daemon process but leaves the Scheduled Task installed, so the task's 30-minute repeat may start it again. Use `uninstall` when automatic startup must be removed, then verify with `status`.
 
-## Current limitations
+## Security, privacy and limits
 
-- Provider usage endpoints, headers, and response shapes are private/unofficial. Schema drift, policy changes, or account restrictions can break collection.
-- Codex credentials are read from either the normal CLI `auth.json` shape or an explicitly configured externally-owned Hermes shared-store shape; subtrack does not refresh or rewrite either. The Hermes monitor's real-model canary invokes Hermes itself, keeping Hermes as the sole refresh owner.
-- The browser currently refreshes Usage every 30 seconds even if `uiRefreshSeconds` is changed. Provider polling remains separately configured (Claude 180 seconds and Codex 60 seconds by default).
-- Failed polls keep the last-known windows visible with a current error status; this is not history, and window freshness can differ from the latest-attempt timestamp.
-- Sessions scans existing Claude transcript metadata and read-only Codex thread databases. It does not display prompt/message/tool content. A `recent` Codex row means its database timestamp is within the current 24-hour heuristic; it does not prove that a Codex window is open.
-- Configured Claude homes are added to Sessions discovery only in `readonly` mode. Subtrack-owned Usage homes are excluded because their probe transcripts are not interactive work sessions or safe resume targets.
-- Live `open` detection is Claude-only and depends on observed x64 Windows PEB offsets. A partial scan remains usable and reports warnings when a home, Codex database, or live-window probe cannot be read.
-- Services discovery is heuristic and Windows-specific. Its untracked list is not an exhaustive process inventory, and command lines may contain sensitive arguments.
-- Services HTTP definitions are trusted local configuration: the current probe concatenates an unvalidated port/path and follows redirects, so an `@host` path or redirect can send a request outside loopback.
-- The Services buttons have narrower semantics than their labels suggest: `restart` only triggers a Scheduled Task, `stop` stops only its current run, and `register` creates an at-logon task without starting it or adding a Services definition.
-- The Services grid is desktop-oriented, and the current UI has known accessibility and narrow-screen gaps.
-- Projects, Cleanup, and a general-purpose uptime watchdog are not implemented product features. The shipped watchdog is deliberately limited to configured Hermes gateways.
+- The server binds to IPv4 loopback, `127.0.0.1` on port `7777` by default, over plain HTTP. There is no login, no TLS and no roles. Loopback is not authentication: any program running as the same Windows user can read the API or call the POST routes. Do not expose the dashboard through a tunnel, proxy or LAN bind.
+- Usage is a live in-memory snapshot. Sessions and the session breakdown read provider-owned files (Claude transcripts, Codex databases and rollouts) and return metadata only: no prompts, messages, tool output, full command lines or environments. subtrack creates no session or usage history database.
+- Credentials are plain files (JSON for Claude and Codex, a cookie text file for Grok) in per-account folders under `%USERPROFILE%\.subtrack\`, without encryption at rest. The only credential subtrack refreshes is a Claude account in owned mode; read-only homes, static tokens, Codex `auth.json` and Grok cookies are never written. The Windows keyring module in `src/secrets.ts` is not on the live authentication path.
+- Access tokens are sent over HTTPS only to the providers' own usage endpoints; an owned-mode Claude refresh token goes only to the Claude token endpoint. Those endpoints and their response shapes are unofficial, observed contracts and can change without notice.
+- Sessions exposes account labels, session titles and ids, working directories and resume commands. Services exposes task names and full process command lines, which can contain secrets, and its buttons change Task Scheduler state: `restart` only starts a task, `stop` stops its current run, `register` creates an at-logon task without starting it.
+- The Windows tab never compacts, warms, clears or types into a window. Its four buttons only edit the mode file that your two Scheduled Tasks obey; clicking a row switches herdr to that window and tries to bring its terminal to the front.
+- Apart from the providers' usage endpoints, the Claude token endpoint that refreshes owned-mode accounts, and the optional Hermes monitor (its six-hour model check through the `hermes` command and its heartbeat and alert webhooks), the only outbound connection is the Codex session breakdown, which logs into each host in `codexRemotes` over ssh with your own identity and only reads. Treat `accounts.json` and `services.json` as trusted local configuration; the Services HTTP probe does not validate its port and path and follows redirects.
+- subtrack has no cleanup actions and no general uptime watchdog. Apart from the daemon restarting the dashboard itself, the only automatic recovery is the Hermes gateway restart described above.
+
+The full list of open risks and safe operating practices is in [docs/security.md](docs/security.md).
+
+## Repository layout
+
+```text
+src/
+  cli.ts, server.ts, poller.ts, config.ts, types.ts   CLI entry, HTTP routes, scheduling, accounts.json
+  adapters/     Claude, Codex and Grok usage calls
+  auth/         credential readers and the Claude owned-mode refresh
+  burn/         which sessions used up a five-hour limit, locally and over ssh
+  sessions/     Claude and Codex session discovery and live-window matching
+  fleet/        herdr panes, window modes and opening a window (the Windows tab)
+  ops/          Services snapshot, probes and Task Scheduler actions
+  hermes/       Hermes gateway monitor
+  daemon.ts, install.ts   always-on supervisor and Scheduled Task installer
+web/            one HTML page and one script for each of the six pages, plus burn.js, modes.js, format.js and styles.css
+tests/          over 300 tests plus fixtures of recorded provider responses
+docs/           usage, configuration, architecture, api, operations, security, development, project-history
+scripts/dev-serve.ts   read-only diagnostic server on a second port, never refreshes a token
+```
+
+`npm test` runs more than 300 tests in a few seconds; they cover the poller, every adapter and credential reader, the server routes, the session breakdown, sessions, the Windows tab, services and the browser renderers. The source is 48 TypeScript modules under `src/` with no build step; `tsx` runs them directly on Node.js 24.
 
 ## Documentation
 
@@ -127,3 +160,7 @@ Only a confirmed missing runtime can trigger auto-heal. It requires two failed c
 - [Security and privacy](docs/security.md)
 - [Development guide](docs/development.md)
 - [Project history](docs/project-history.md)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
