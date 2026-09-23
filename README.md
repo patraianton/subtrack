@@ -2,9 +2,10 @@
 
 `subtrack` is a local, Windows-first dashboard for people who run several Claude, Codex and Grok subscriptions at once. It shows how much of every five-hour and weekly limit is left, keeps a cheat sheet of the commands you use to drive those accounts, and gives a long-running local job a place on the screen.
 
-The tab bar has three views:
+The tab bar has four views:
 
 - **Usage** shows the current 5-hour session and 7-day limits for every enabled account, plus Claude-only Opus and Fable windows when the provider reports them. Cards are grouped by provider and sorted by the nearest weekly reset. A rate-limited account waits exactly as long as the provider's `Retry-After` asks and says so on the card, keeping the last real numbers visible.
+- **Windows** lists every herdr pane running Claude — folder, pane, what the agent is doing, how long it has been idle, and which account home it burns — and lets you pin how each window should be cared for: `warm` (keep the cache warm, never compact), `off` (leave it completely alone), `ever` (always warm, cleared with a handover when the context fills), or back to `auto`. The mark is stored in `~/.claude/idle-handover/window-modes.json`, the same file the `ccmode` shell function writes; external Scheduled Tasks read it and act on it. Subtrack itself never compacts, warms or types into a window — it only shows and edits the mark, and explains per window what the watchdog would do next.
 - **Commands** is a searchable cheat sheet of the shell commands behind the panel: the subtrack CLI out of the box, plus whatever launcher verbs you add to `web/commands.js`. Click a row to copy it; the "quiz me" switch hides the explanations so you can drill them.
 - **Conveyor** renders `~/.autopase-conveyor-status.json`, a small JSON status file an external pipeline can write (task, phase, timeline, links), so a long-running local job is visible next to the limits it burns.
 

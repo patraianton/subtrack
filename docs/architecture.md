@@ -6,11 +6,12 @@ For the exact HTTP contract, see [HTTP API](api.md). Operational and trust-bound
 
 ## Scope and boundaries
 
-`subtrack` is one local web server with three independent surfaces:
+`subtrack` is one local web server with four independent surfaces:
 
 - **Usage** polls Claude, Codex, and Grok account limits, normalizes them, and keeps the latest value per account in process memory. On demand it can also break a Claude or Codex session window down by local session ("burn"), which is an expansion of the Usage card rather than a separate surface.
 - **Sessions** reads existing local Claude/Codex work-session metadata, deduplicates copies, and on Windows correlates live Claude processes with their account home and working directory.
 - **Services** takes short-lived Windows system snapshots, compares them with a local service manifest, appends the latest independently collected Hermes fleet snapshot when configured, and exposes explicit Task Scheduler actions.
+- **Windows** lists the herdr panes running Claude, joins them with Sessions activity and Usage headroom, and reads or writes the per-window care mark that the external cache warmer and idle-compaction watchdog obey. Subtrack shows and edits that mark; it never compacts, warms, clears, or sends keys to a window itself.
 
 The production server binds plain HTTP to IPv4 loopback `127.0.0.1` only. It advertises `http://localhost:<port>` to the browser, but it is not a remote service, an authenticated multi-user service, or a stable public API. Loopback reduces exposure; it is not an authorization boundary against other processes or browser content running as the same user.
 
@@ -245,6 +246,19 @@ Codex also breaks the "everything is local" rule, because on this fleet Codex de
 
 The weight is `input + 1.25 × cacheWrite + 0.1 × cacheRead + 5 × output`. It is subtrack's own cost-shaped ranking, not a provider formula; raw token components travel in the response so the UI (or a reader) can reweigh them.
 
+## Windows data flow
+
+```text
+herdr pane list -> Claude panes -> join with /api/sessions activity, Usage headroom,
+   window-modes.json marks and idle-compact state.json -> /api/fleet -> web/fleet.js
+                                   mode button -> POST /api/fleet/mode -> window-modes.json
+```
+
+- The pane list is authoritative for which windows exist and what each one is doing. Subtrack's own session records supply last activity, folder, and account home; a record that reports `claude-default` takes the home of the live window in the same folder, because a session started after a `/clear` does not know its own home.
+- `~/.claude/idle-handover/window-modes.json` is shared state, not a subtrack file. `ccmode` in PowerShell writes the same rows, and two external Scheduled Tasks read them: `claude-window-care` (cache warming) and `claude-idle-compact` (idle compaction). Writes preserve every row that belongs to another window.
+- `compactable` and `reason` restate the idle-compaction watchdog's own rules so the page can explain, per window, why a window will or will not be taken next round. They are a mirror of an external script and must be kept in step with it; nothing in subtrack acts on them.
+- There is no cache on this surface and no background work: each request shells out to herdr once.
+
 ## Module ownership and dependency-injection seams
 
 | Module | Owns | Important injected seam |
@@ -273,11 +287,15 @@ The weight is `input + 1.25 × cacheWrite + 0.1 × cacheRead + 5 × output`. It 
 | `src/ops/probe.ts`, `httpProbe.ts` | Pure health derivation and loopback HTTP check | System snapshot/fetch/clock inputs |
 | `src/ops/services.ts` | Snapshot build, sorting, untracked derivation, cache | PowerShell runner, HTTP probe, clock, cache TTL |
 | `src/ops/actions.ts` | Explicit Task Scheduler mutations | PowerShell runner, clock, base home |
+| `src/fleet/types.ts` | Window mark, pane, and fleet-row contracts | None |
+| `src/fleet/modes.ts` | The shared `window-modes.json` format: parse, mark lookup, mark replacement, write | Base home |
+| `src/fleet/panes.ts` | `herdr pane list` acquisition and envelope parsing | `HerdrRunner`, herdr binary location |
+| `src/fleet/fleet.ts` | Pane/session/mark/compaction join, watchdog verdict, mark writes | Base home, herdr runner, Sessions provider, blocked-account source, clock |
 | `src/hermes/config.ts` | Validated `hermes.json` loading | Base home |
 | `src/hermes/probe.ts`, `windows.ts` | Profile discovery, PID/state/platform/auth checks, live auth probe | Filesystem, PowerShell, fetch, clock |
 | `src/hermes/monitor.ts` | Background scheduling, canaries, hysteresis, safe restart, state/events/webhooks, public Services rows | Timers, filesystem, PowerShell, fetch, restart/canary commands |
 | `src/hermes/supervisor.ts` | Post-bind initialization, visible failure row, and bounded initialization retry | Monitor factory, timer, clock |
-| `web/app.js`, `web/sessions.js`, `web/services.js` | Browser rendering, local polling, copy controls, confirmations | Same-origin HTTP API |
+| `web/app.js`, `web/sessions.js`, `web/services.js`, `web/fleet.js` | Browser rendering, local polling, copy controls, confirmations, mode buttons | Same-origin HTTP API |
 | `src/install.ts`, `daemon.ts` | Windows startup registration and serve-child supervision | Base home; most process/system calls are concrete |
 
 ## Server, installer, and daemon topology

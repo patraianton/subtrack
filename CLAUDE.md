@@ -4,15 +4,16 @@ This file guides Claude Code when working in this repository. Preserve any surro
 
 ## Project contract
 
-`subtrack` is an always-on local dashboard with three implemented surfaces:
+`subtrack` is an always-on local dashboard with four implemented surfaces:
 
 - **Usage** shows live five-hour and weekly limits for multiple Claude and Codex accounts, plus Grok (SuperGrok) two-hour model windows and its weekly SuperGrok allowance. Clicking a Claude `session` bar expands a local, on-demand breakdown of which sessions burned that window.
 - **Sessions** reads existing local Claude/Codex session metadata and, on Windows, correlates live Claude processes with accounts, projects, working directories, and resume commands.
 - **Services** shows a live Windows Task Scheduler, listener, and selected-process snapshot with explicit task actions.
+- **Windows** lists the herdr panes running Claude with their idle time, account, and care mark, and lets the operator set that mark per window (`ever` / `warm` / `off` / back to auto). The mark file is shared with the `ccmode` shell function.
 
-The browser tab bar shows **Usage**, **Commands** (a static cheat sheet in `web/commands.js`; no API) and **Conveyor** (`/api/conveyor` serves `~/.autopase-conveyor-status.json` as-is). The Sessions and Services pages stay served at `/sessions.html` and `/services.html` but are not linked from the tab bar. The UI is English-only.
+The browser tab bar shows **Usage**, **Windows** (`/api/fleet`), **Commands** (a static cheat sheet in `web/commands.js`; no API) and **Conveyor** (`/api/conveyor` serves `~/.autopase-conveyor-status.json` as-is). The Sessions and Services pages stay served at `/sessions.html` and `/services.html` but are not linked from the tab bar. The UI is English-only.
 
-Usage and Services response snapshots are process-local and live-only. Sessions reads provider-owned history already on disk but keeps only metadata caches of its own; it does not persist transcripts, prompts, messages, tool output, command lines, or environments. There is no subtrack usage/session history database, trends database, Projects/Cleanup view, or interactive-window watchdog. Configuration, provider-owned session stores, credential files, the Services manifest, and daemon logs do persist locally. Historical specs under `docs/superpowers/` are context, not promises. Current behavior is canonical in [Architecture](docs/architecture.md) and [HTTP API](docs/api.md).
+Usage and Services response snapshots are process-local and live-only. Sessions reads provider-owned history already on disk but keeps only metadata caches of its own; it does not persist transcripts, prompts, messages, tool output, command lines, or environments. There is no subtrack usage/session history database, trends database, or Projects/Cleanup view. Subtrack still runs no interactive-window watchdog of its own: the Windows tab reads and writes `~/.claude/idle-handover/window-modes.json`, which two external Scheduled Tasks (`claude-window-care`, `claude-idle-compact`) obey; subtrack never compacts, warms, clears, or types into a window. Configuration, provider-owned session stores, credential files, the Services manifest, and daemon logs do persist locally. Historical specs under `docs/superpowers/` are context, not promises. Current behavior is canonical in [Architecture](docs/architecture.md) and [HTTP API](docs/api.md).
 
 Node 24 runs TypeScript directly through `tsx`; there is no build output, and imports intentionally include `.ts` extensions. Runtime dependencies are `@napi-rs/keyring` and `open`.
 
