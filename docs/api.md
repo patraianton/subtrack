@@ -621,6 +621,12 @@ interface FleetWindow {
   folder: string;              // from the session record, else the cwd's last segment
   cwd: string;                 // no trailing separator
   title: string | null;        // terminal title, stripped
+  workspaceLabel: string | null;  // herdr's own name for the window, as the sidebar shows it
+  workspaceNumber: number | null; // its place in the sidebar
+  repoName: string | null;     // the repo this checkout belongs to
+  isWorktree: boolean;         // a linked git worktree of that repo, not the repo itself
+  depth: number;               // 1 when the row nests under the window holding the repo
+  branch: string | null;       // read from .git, or a short commit for a detached head
   agentStatus: string;         // herdr's own word: 'working' | 'idle' | 'done' | ...
   sessionId: string | null;
   lastActivity: string | null; // ISO-8601, from /api/sessions
@@ -637,7 +643,7 @@ interface FleetWindow {
 }
 
 interface FleetResponse {
-  windows: FleetWindow[];      // longest idle first
+  windows: FleetWindow[];      // herdr's sidebar order: repos in their own order, worktrees nested
   generatedAt: string;
   warnings: string[];
   idleWindowMinutes: { min: number; max: number };
@@ -656,6 +662,8 @@ interface FleetResponse {
 - herdr owns the pane list. An unreachable or silent herdr yields `windows: []` plus a warning, never a `500`; a failing `/api/sessions` likewise degrades to a warning, leaving panes with `idleMinutes: null`.
 - `compactable` and `reason` mirror the thresholds of the external `claude-idle-compact` watchdog (`~/.claude/hooks/idle-compact-watch.ps1`): marked `off`, `working`, unknown activity, an account without headroom, idle under 55 minutes, and idle over 24 hours are all reasons it would skip. Subtrack itself never compacts, warms, or writes to a window.
 - Account headroom comes from the same in-process snapshots `/api/usage` serves: non-`ok` status or a session/weekly window at 99 percent or more.
+- Rows arrive in the order of the herdr sidebar, not sorted by subtrack: `herdr workspace list` supplies each window's number, name and worktree block; windows are grouped by repo, the groups ordered by their first workspace number, and a repo's linked worktrees follow the window that holds the repo itself (`depth: 1`). A workspace herdr does not report keeps `depth: 0` and sorts last.
+- `branch` is read from the folder's `.git` (a file pointer in a linked worktree), never by running `git`: sixty windows would mean sixty processes. There are no ahead/behind counts.
 
 ## `POST /api/fleet/mode`
 

@@ -30,12 +30,36 @@ export interface HerdrPane {
   focused: boolean;
 }
 
+/**
+ * A herdr workspace as the sidebar knows it: its number is the order the operator sees, and the
+ * worktree block says whether this checkout is the repo itself or one of its linked worktrees.
+ */
+export interface HerdrWorkspace {
+  workspaceId: string;
+  number: number;
+  label: string;
+  focused: boolean;
+  /** Repo identity shared by a checkout and all of its linked worktrees. */
+  repoKey: string | null;
+  repoName: string | null;
+  isWorktree: boolean;
+}
+
 export interface FleetWindow {
   paneId: string;
   workspaceId: string | null;
   folder: string;
   cwd: string;
   title: string | null;
+  /** herdr's own name for the window, and its place in the sidebar. */
+  workspaceLabel: string | null;
+  workspaceNumber: number | null;
+  /** The repo this checkout belongs to, and whether it is a linked worktree of it. */
+  repoName: string | null;
+  isWorktree: boolean;
+  /** 1 when the row is nested under the window that holds the repo itself, else 0. */
+  depth: number;
+  branch: string | null;
   agentStatus: string;
   sessionId: string | null;
   lastActivity: string | null;

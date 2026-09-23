@@ -211,7 +211,13 @@ h1 { font-size: 18px; margin: 0; }
 .fl-row.go { cursor: pointer; }
 .fl-row.go:hover { border-color: #3c4652; }
 .fl-head { background: none; border: none; color: var(--muted); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; padding-bottom: 0; margin-bottom: 2px; }
-.fl-folder { grid-area: folder; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-folder { grid-area: folder; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: calc(var(--d, 0) * 16px); }
+/* The herdr sidebar's shape: a repo's own window, then its worktrees nested under it. */
+.fl-row.root { margin-top: 9px; }
+.fl-row.nested { border-color: #1b2129; background: #12171e; }
+.fl-tree { color: var(--muted); font-weight: 400; margin-right: 5px; }
+.fl-branch { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; margin-right: 8px; }
+.fl-wt { color: var(--muted); border: 1px solid #30363d; border-radius: 4px; padding: 0 4px; margin-right: 8px; font-size: 10.5px; }
 .fl-pane { grid-area: pane; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; }
 .fl-status { grid-area: status; font-size: 12px; color: var(--muted); }
 .fl-status.s-working { color: var(--warn); }

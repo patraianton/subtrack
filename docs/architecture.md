@@ -249,13 +249,15 @@ The weight is `input + 1.25 × cacheWrite + 0.1 × cacheRead + 5 × output`. It 
 ## Windows data flow
 
 ```text
-herdr pane list -> Claude panes -> join with /api/sessions activity, Usage headroom,
-   window-modes.json marks and idle-compact state.json -> /api/fleet -> web/fleet.js
+herdr pane list + workspace list -> Claude panes in sidebar order -> join with /api/sessions
+   activity, Usage headroom, window-modes.json marks, idle-compact state.json and the
+   branch read from each folder's .git -> /api/fleet -> web/fleet.js
                                    mode button -> POST /api/fleet/mode -> window-modes.json
                                    row click   -> POST /api/fleet/focus -> herdr workspace/tab
                                                   + raise the terminal window
 ```
 
+- The order is herdr's, not ours. `herdr workspace list` carries the sidebar number, the operator's name for the window, and the worktree block; windows group by repo, groups sort by their first workspace number, and a repo's linked worktrees hang under the window that holds the repo itself. Reading the page next to the sidebar must not mean re-finding every window.
 - The pane list is authoritative for which windows exist and what each one is doing. Subtrack's own session records supply last activity, folder, and account home; a record that reports `claude-default` takes the home of the live window in the same folder, because a session started after a `/clear` does not know its own home.
 - `~/.claude/idle-handover/window-modes.json` is shared state, not a subtrack file. `ccmode` in PowerShell writes the same rows, and two external Scheduled Tasks read them: `claude-window-care` (cache warming) and `claude-idle-compact` (idle compaction). Writes preserve every row that belongs to another window.
 - `compactable` and `reason` restate the idle-compaction watchdog's own rules so the page can explain, per window, why a window will or will not be taken next round. They are a mirror of an external script and must be kept in step with it; nothing in subtrack acts on them.
@@ -293,7 +295,8 @@ herdr pane list -> Claude panes -> join with /api/sessions activity, Usage headr
 | `src/ops/actions.ts` | Explicit Task Scheduler mutations | PowerShell runner, clock, base home |
 | `src/fleet/types.ts` | Window mark, pane, and fleet-row contracts | None |
 | `src/fleet/modes.ts` | The shared `window-modes.json` format: parse, mark lookup, mark replacement, write | Base home |
-| `src/fleet/panes.ts` | `herdr pane list` acquisition and envelope parsing | `HerdrRunner`, herdr binary location |
+| `src/fleet/panes.ts` | `herdr pane list` / `workspace list` acquisition and envelope parsing | `HerdrRunner`, herdr binary location |
+| `src/fleet/branch.ts` | The checked-out branch of a folder, read from `.git` without running git | Filesystem |
 | `src/fleet/fleet.ts` | Pane/session/mark/compaction join, watchdog verdict, mark writes | Base home, herdr runner, Sessions provider, blocked-account source, clock |
 | `src/fleet/focus.ts` | Opening a window: workspace/tab focus and raising the terminal | `HerdrRunner`, `PwshRunner` |
 | `src/hermes/config.ts` | Validated `hermes.json` loading | Base home |

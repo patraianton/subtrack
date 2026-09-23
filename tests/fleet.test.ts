@@ -25,6 +25,22 @@ const PANE_LIST = JSON.stringify({
   },
 });
 
+const WORKSPACE_LIST = JSON.stringify({
+  id: 'cli:workspace:list',
+  result: {
+    workspaces: [
+      // The repo's own window comes first in the sidebar; its linked worktree sits under it even
+      // though herdr numbered it much later.
+      // The same repo reported two ways: the extended \\?\ path and the plain one. They must group.
+      { workspace_id: 'w7Y', number: 2, label: 'pricing', focused: true, worktree: { repo_key: '\\\\?\\C:\\p\\pricing\\.git', repo_name: 'pricing', is_linked_worktree: false } },
+      { workspace_id: 'w85', number: 40, label: 'news digest', focused: false, worktree: { repo_key: 'C:\\P\\pricing\\.git', repo_name: 'pricing', is_linked_worktree: true } },
+    ],
+  },
+});
+
+const herdr = (panes = PANE_LIST): HerdrRunner => async (args) =>
+  ({ code: 0, stdout: args[0] === 'workspace' ? WORKSPACE_LIST : panes, stderr: '' });
+
 function session(over: Partial<WorkSession>): WorkSession {
   return {
     provider: 'claude', id: 'sid', title: null, accountId: 'cc1', accountLabel: 'cc1 home', launcher: 'cc1',
@@ -112,7 +128,7 @@ test('getFleet joins herdr panes with subtrack activity, marks and compaction hi
       JSON.stringify({ 'sid-news': { at: '2026-09-23T09:16:03', failed: true } }), 'utf8');
     await writeMarks(base, [{ cwd: 'C:\\Users\\<user>\\projects\\news', pane: 'w85:p1', mode: 'off', set: '2026-09-23 09:00' }]);
 
-    const run: HerdrRunner = async () => ({ code: 0, stdout: PANE_LIST, stderr: '' });
+    const run = herdr();
     const getFleet = makeGetFleet({
       base,
       run,
@@ -140,7 +156,14 @@ test('getFleet joins herdr panes with subtrack activity, marks and compaction hi
     assert.equal(pricing.accountId, 'cc5', 'claude-default filled in from the live window of that folder');
     assert.equal(pricing.compactable, false);
     assert.equal(pricing.reason, 'working');
-    assert.equal(res.windows[0]!.paneId, 'w85:p1', 'longest idle first');
+    // herdr's own order: the repo's window, then its worktree nested under it — not our idle sort.
+    assert.deepEqual(res.windows.map((w) => w.paneId), ['w7Y:p2', 'w85:p1']);
+    assert.equal(pricing.depth, 0);
+    assert.equal(pricing.workspaceLabel, 'pricing');
+    assert.equal(news.depth, 1, 'a linked worktree hangs under the repo it belongs to');
+    assert.equal(news.isWorktree, true);
+    assert.equal(news.repoName, 'pricing');
+    assert.equal(news.workspaceNumber, 40);
   });
 });
 
